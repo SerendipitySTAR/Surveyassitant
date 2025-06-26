@@ -73,31 +73,44 @@ class FactCheckModel:
         if claims_data:
             for i, claim_info in enumerate(claims_data):
                 claim_text = claim_info.get("text", "")
-                # Simulate checking each claim
-                claim_score = round(random.uniform(0.65, 0.98), 3) # Simulate score for this specific claim
-                individual_consistency_scores.append(claim_score)
+                verification_details = claim_info.get("verification_details", {})
 
-                claim_status = "Supported" if claim_score > 0.85 else \
-                               "Neutral/Needs Evidence" if claim_score > 0.7 else \
-                               "Potentially Contradicted"
+                # Base score on EvidenceBuilder's overall_claim_score if available, else random
+                eb_score = verification_details.get("overall_claim_score")
+                if eb_score is not None:
+                    # FactCheckModel might refine this score or mostly trust it.
+                    # Let's simulate a slight adjustment or noise around EB's score.
+                    fact_check_claim_score = round(max(0, min(1, eb_score + random.uniform(-0.05, 0.05))), 3)
+                else: # Fallback if no score from EvidenceBuilder
+                    fact_check_claim_score = round(random.uniform(0.65, 0.98), 3)
+
+                individual_consistency_scores.append(fact_check_claim_score)
+
+                # Determine status based on this FactCheckModel's score
+                claim_status_fc = "Supported by FactChecker" if fact_check_claim_score > 0.85 else \
+                                  "Neutral/Needs More Detail (FactChecker)" if fact_check_claim_score > 0.7 else \
+                                  "Potentially Disputed by FactChecker"
 
                 issue = None
-                if claim_status != "Supported":
+                if "Disputed" in claim_status_fc or \
+                   (verification_details.get("cross_paper_consistency", {}).get("consistency_status") == "Potentially Inconsistent" and \
+                    fact_check_claim_score < 0.8): # Example: flag if cross-paper inconsistent and FC score not high
                     issue = {
                         "original_claim_id": claim_info.get("claim_id", f"claim_idx_{i}"),
                         "claim_text_snippet": claim_text[:100] + "...",
-                        "issue_description": f"Claim consistency simulated as '{claim_status}'. Confidence: {claim_score}",
-                        "severity_level": "Medium" if "Contradicted" in claim_status else "Low",
-                        "suggestion": "Verify this claim against source or provide stronger evidence."
+                        "issue_description": f"FactCheck simulation: status '{claim_status_fc}' (score: {fact_check_claim_score}). EB cross-consistency: {verification_details.get('cross_paper_consistency', {}).get('consistency_status', 'N/A')}.",
+                        "severity_level": "Medium",
+                        "suggestion": "Review this claim due to combined low FactChecker score and/or conflicting cross-paper evidence."
                     }
-                    if not issue in issues_found: issues_found.append(issue)
-
+                    if not any(ex_issue["original_claim_id"] == issue["original_claim_id"] for ex_issue in issues_found): # Avoid duplicate issues for same claim
+                        issues_found.append(issue)
 
                 processed_claims_details.append({
                     "original_claim_id": claim_info.get("claim_id", f"claim_idx_{i}"),
                     "claim_text": claim_text,
-                    "simulated_check_score": claim_score,
-                    "simulated_status": claim_status
+                    "fact_check_score": fact_check_claim_score, # Score from this FactCheckModel simulation
+                    "fact_check_status": claim_status_fc,
+                    "evidence_builder_verification": verification_details # Include EB's detailed verification
                 })
 
             if individual_consistency_scores:
@@ -202,7 +215,7 @@ class Validator:
         return round(completeness_score, 2)
 
 
-    def _calculate_quality_score(self, fact_consistency_score: float, completeness_score: float, format_score: float, plagiarism_score: float) -> float:
+    def _calculate_quality_score(self, fact_consistency_score: float, completeness_score: float, plagiarism_score: float) -> tuple[float, float, float]:
         """
         Calculates an overall quality score based on various metrics.
         Novelty is hard to quantify here, so its weight is effectively redistributed.
@@ -216,19 +229,32 @@ class Validator:
         """
         logger.debug("Validator: Calculating overall quality score.")
 
-        credibility_derived = fact_consistency_score * (1.0 - plagiarism_score) # Penalize higher plagiarism
+        # Credibility component based on fact consistency and lack of plagiarism
+        credibility_derived = fact_consistency_score * (1.0 - plagiarism_score)
 
-        # Using adjusted weights: Completeness (0.4), Derived Credibility (0.4), Format (0.2)
-        # This re-allocates Novelty's weight implicitly.
-        current_weights = {"completeness": 0.4, "credibility_derived": 0.4, "format": 0.2}
+        # Novelty score simulation (as it's hard to measure without more context/KB)
+        # For now, let's assume a baseline novelty or make it a small random factor if not otherwise determined.
+        # A true novelty score would require comparing findings against the broader KB.
+        # Let's simulate it as a random value for now, or it could be an input if assessed elsewhere.
+        simulated_novelty_score = round(random.uniform(0.5, 0.8), 2) # Assume moderate novelty for simulation
+        # In a real system, if novelty cannot be assessed, its weight should ideally be redistributed or the component zeroed.
+        # Forcing it to be zero if not assessable:
+        # simulated_novelty_score = 0.0 # if no specific novelty assessment is done.
 
-        weighted_score = (completeness_score * current_weights["completeness"]) + \
-                         (credibility_derived * current_weights["credibility_derived"]) + \
-                         (format_score * current_weights["format"])
+        # Using weights from README: completeness: 0.4, novelty: 0.3, credibility: 0.3
+        # The 'format_score' is a good diagnostic but might not be part of this specific 3-component quality score.
+        # It's used for identifying 'weak_areas'.
+
+        weighted_score = (completeness_score * self.quality_metrics_weights["completeness"]) + \
+                         (simulated_novelty_score * self.quality_metrics_weights["novelty"]) + \
+                         (credibility_derived * self.quality_metrics_weights["credibility"])
 
         final_score = round(max(0.0, min(1.0, weighted_score)), 3) # Ensure score is between 0 and 1
-        logger.debug(f"Quality score calculation: Completeness={completeness_score}, Credibility_Derived={credibility_derived}, Format={format_score} -> Overall={final_score}")
-        return final_score
+
+        logger.debug(f"Quality score calculation: Completeness={completeness_score:.2f} (w:0.4), "
+                     f"Novelty(sim)={simulated_novelty_score:.2f} (w:0.3), "
+                     f"Credibility_Derived={credibility_derived:.2f} (w:0.3) -> Overall={final_score}")
+        return final_score, simulated_novelty_score, credibility_derived
 
     def evaluate(self, draft_text: str, structured_data_from_weaver: dict) -> dict:
         """
@@ -266,10 +292,11 @@ class Validator:
         completeness_score = self._check_completeness(structured_data_from_weaver, draft_text)
 
         # 5. Overall Quality Score Calculation
-        overall_quality_score = self._calculate_quality_score(
+        # format_score is not passed here as it's not part of the primary 3-component score per README
+        overall_quality_score, novelty_score_sim, credibility_score_derived = self._calculate_quality_score(
             fact_consistency_score,
             completeness_score,
-            format_score,
+            # format_score, # This was an error, format_score is not used for the main weighted score
             plagiarism_score
         )
 
@@ -286,10 +313,12 @@ class Validator:
         validation_report = {
             "overall_score": overall_quality_score,
             "plagiarism_score": plagiarism_score,
-            "fact_consistency_score": fact_consistency_score,
-            "fact_check_details": fact_check_results, # Detailed findings from fact checker
+            "fact_consistency_score": fact_consistency_score, # Average from FactCheckModel
+            "credibility_score_derived": credibility_score_derived, # fact_consistency * (1-plagiarism)
+            "novelty_score_simulated": novelty_score_sim, # Simulated
+            "fact_check_details": fact_check_results,
             "format_score": format_score,
-            "format_details": format_check_results, # Detailed findings on format
+            "format_details": format_check_results,
             "completeness_score": completeness_score,
             "weak_areas_identified": weak_areas,
             "evaluation_timestamp": datetime.utcnow().isoformat() + "Z"
@@ -340,18 +369,21 @@ if __name__ == '__main__':
         "methodology_overview": [{"method": "CNN", "count":1}, {"method":"Transformer", "count":1}],
         "statistics": {"total_themes_identified": 2},
         "conclusion_text": "AI is evolving...",
-        "source_evidence_packages": [ # Added to test claim passing to FactCheckModel
+        "source_evidence_packages": [
             {
                 "paper_id": "arxiv:sample001",
                 "processed_claims": [
-                    {"claim_id": "claim1", "text": "CNNs are effective for X-Ray analysis."},
-                    {"claim_id": "claim2", "text": "Our model achieved 95% accuracy."}
+                    {"claim_id": "claim1", "text": "CNNs are effective for X-Ray analysis.",
+                     "verification_details": {"overall_claim_score": 0.88, "verification_status": "Strongly Supported", "cross_paper_consistency": {"consistency_status": "Mostly Consistent"}}},
+                    {"claim_id": "claim2", "text": "Our model achieved 95% accuracy.",
+                     "verification_details": {"overall_claim_score": 0.75, "verification_status": "Provisionally Verified", "cross_paper_consistency": {"consistency_status": "Neutral/No Strong Signal"}}}
                 ]
             },
             {
                 "paper_id": "pubmed:sample002",
                 "processed_claims": [
-                    {"claim_id": "claim3", "text": "Transformers can summarize patient records."}
+                    {"claim_id": "claim3", "text": "Transformers can summarize patient records.",
+                     "verification_details": {"overall_claim_score": 0.60, "verification_status": "Needs More Evidence", "cross_paper_consistency": {"consistency_status": "Potentially Inconsistent"}}}
                 ]
             }
         ]

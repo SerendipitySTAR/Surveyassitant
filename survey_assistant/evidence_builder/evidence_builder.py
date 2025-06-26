@@ -68,36 +68,90 @@ class EvidenceBuilder:
         logger.debug(f"EvidenceBuilder (Graph): Added conceptual evidence from '{source_id}' {evidence_type} claim '{claim_id}'.")
 
 
-    def _verify_claim_with_kb(self, claim_text: str) -> tuple[str, float, int]:
+    def _verify_claim_with_kb(self, claim_info: dict, source_paper_snippet: str = "") -> dict:
         """
-        Placeholder for verifying a claim against the KnowledgeBase.
-        Returns: (verification_status, cross_validation_score, supporting_evidence_count)
+        Simulates verifying a claim against the KnowledgeBase, incorporating multiple validation layers.
+        Args:
+            claim_info (dict): The claim data from DeepAnalyzer (includes text, confidence, snippet).
+            source_paper_snippet (str): The source text snippet for the claim from the original paper.
+        Returns:
+            A dictionary with detailed verification info.
         """
-        if self.kb:
-            # related_evidence = self.kb.search_related_evidence(claim_text) # Hypothetical KB method
-            # For now, simulate based on claim text length or keywords.
-            # This is highly simplistic and needs a real KB interaction.
-            pass
+        claim_text = claim_info.get("text", "")
+        analyzer_confidence = claim_info.get("confidence", 0.6) # Confidence from DeepAnalyzer
 
-        # Simulation logic:
-        confidence_from_analyzer = 0.6 # Default if not provided by claim
-        if "outperforms" in claim_text.lower() or "significant improvement" in claim_text.lower():
-            cross_val_score = round(random.uniform(0.7, 0.95), 2)
-        elif "limited to" in claim_text.lower() or "drawback is" in claim_text.lower(): # Unlikely to be a claim, but for demo
-            cross_val_score = round(random.uniform(0.3, 0.6), 2)
-        else:
-            cross_val_score = round(random.uniform(0.5, 0.85), 2)
+        # Layer 1: Direct Evidence Matching (Simulated)
+        direct_evidence_details = {
+            "status": "Not Found",
+            "snippet_match_score": 0.0, # Score of how well claim_text matches source_paper_snippet
+            "matched_snippet": None
+        }
+        if source_paper_snippet: # DeepAnalyzer provides this as 'source_text_snippet' in claim_data
+            # Simple similarity (e.g. Jaccard, or just presence)
+            if claim_text.lower() in source_paper_snippet.lower() or \
+               any(word in source_paper_snippet.lower() for word in claim_text.lower().split()[:5]): # Basic check
+                direct_evidence_details["status"] = "Found"
+                direct_evidence_details["snippet_match_score"] = round(random.uniform(0.7, 0.95), 2)
+                direct_evidence_details["matched_snippet"] = source_paper_snippet
 
-        # Adjust based on (future) confidence from DeepAnalyzer
-        # cross_val_score = (cross_val_score + confidence_from_analyzer) / 2
+        # Layer 2: Indirect Inference Validation (Simulated)
+        indirect_inference_details = {
+            "status": "Not Assessed",
+            "inferred_premises_mock": [],
+            "inference_strength": 0.0
+        }
+        if direct_evidence_details["status"] != "Found" and random.random() < 0.2: # 20% chance for indirect if no direct
+            indirect_inference_details["status"] = "Plausible Inference"
+            indirect_inference_details["inferred_premises_mock"] = [f"mock_premise_id_{random.randint(100,199)}", f"mock_premise_id_{random.randint(200,299)}"]
+            indirect_inference_details["inference_strength"] = round(random.uniform(0.5, 0.75), 2)
 
-        status = "Provisionally Verified" if cross_val_score > 0.7 else \
-                 "Needs More Evidence" if cross_val_score > 0.5 else \
-                 "Potentially Disputed"
+        # Layer 4: Cross-Paper Consistency (Simulated)
+        # (Layer 3, Reproducibility, is handled separately per paper, not per claim)
+        num_related_papers_checked = random.randint(0, 5)
+        supporting_papers_mock = [f"paper_id_supp_{i}" for i in range(random.randint(0, num_related_papers_checked))]
+        conflicting_papers_mock = [f"paper_id_conf_{i}" for i in range(random.randint(0, max(0, num_related_papers_checked - len(supporting_papers_mock))))]
 
-        supporting_count = random.randint(0, 3) # Simulate number of supporting items found in KB
+        cross_paper_consistency = {
+            "papers_checked_count": num_related_papers_checked,
+            "supporting_papers_count": len(supporting_papers_mock),
+            "conflicting_papers_count": len(conflicting_papers_mock),
+            "supporting_paper_ids_mock": supporting_papers_mock,
+            "conflicting_paper_ids_mock": conflicting_papers_mock,
+            "consistency_status": "No Overlap"
+        }
+        if num_related_papers_checked > 0:
+            if len(supporting_papers_mock) > len(conflicting_papers_mock):
+                cross_paper_consistency["consistency_status"] = "Mostly Consistent"
+            elif len(conflicting_papers_mock) > 0:
+                cross_paper_consistency["consistency_status"] = "Potentially Inconsistent"
+            else:
+                cross_paper_consistency["consistency_status"] = "Neutral/No Strong Signal"
 
-        return status, cross_val_score, supporting_count
+        # Overall Score and Status for this claim based on simulated layers
+        overall_claim_score = analyzer_confidence # Start with DeepAnalyzer's confidence
+        if direct_evidence_details["status"] == "Found":
+            overall_claim_score = max(overall_claim_score, direct_evidence_details["snippet_match_score"])
+        elif indirect_inference_details["status"] == "Plausible Inference":
+            overall_claim_score = (overall_claim_score + indirect_inference_details["inference_strength"]) / 2
+
+        if cross_paper_consistency["consistency_status"] == "Mostly Consistent":
+            overall_claim_score = min(1.0, overall_claim_score * 1.1) # Boost for consistency
+        elif cross_paper_consistency["consistency_status"] == "Potentially Inconsistent":
+            overall_claim_score = overall_claim_score * 0.8 # Penalize for inconsistency
+
+        final_verification_status = "Strongly Supported" if overall_claim_score > 0.85 else \
+                                   "Provisionally Verified" if overall_claim_score > 0.7 else \
+                                   "Needs More Evidence" if overall_claim_score > 0.5 else \
+                                   "Weakly Supported/Disputed"
+
+        return {
+            "verification_status": final_verification_status,
+            "overall_claim_score": round(overall_claim_score, 3),
+            "direct_evidence": direct_evidence_details,
+            "indirect_inference": indirect_inference_details,
+            "cross_paper_consistency": cross_paper_consistency,
+            # supporting_evidence_count_kb is now part of cross_paper_consistency
+        }
 
 
     def verify_reproducibility(self, paper_info: dict) -> dict:
@@ -151,16 +205,15 @@ class EvidenceBuilder:
         for claim_data in potential_claims_from_analyzer:
             self._add_evidence_to_graph_placeholder(claim_data, source_paper_info, evidence_type="supports_claim")
 
-            # Simulate verification using KB (placeholder logic)
-            # The confidence from DeepAnalyzer (claim_data.get('confidence', 0.6)) could be used here.
-            claim_text = claim_data.get('text', '')
-            verification_status, cv_score, support_count = self._verify_claim_with_kb(claim_text)
+            # Get the source snippet for this specific claim from DeepAnalyzer's output
+            source_snippet_for_claim = claim_data.get('source_text_snippet', '')
+
+            # Call the enhanced _verify_claim_with_kb
+            verification_details = self._verify_claim_with_kb(claim_data, source_snippet_for_claim)
 
             processed_claims.append({
-                **claim_data, # Original claim data from DeepAnalyzer
-                "verification_status": verification_status,
-                "cross_validation_score": cv_score,
-                "supporting_evidence_count_kb": support_count
+                **claim_data, # Original claim data from DeepAnalyzer (text, original confidence, snippet)
+                "verification_details": verification_details # Contains status, score, and layer-specific info
             })
 
         reproducibility_report = self.verify_reproducibility(source_paper_info)
@@ -229,8 +282,9 @@ if __name__ == '__main__':
         "limitations": ["Only tested on Dataset Alpha."],
         "methodologies_used": ["Deep Learning", "CNN"],
         "potential_claims": [
-            {"claim_id": "arxiv:test001_claim_1", "text": "Method X significantly outperforms existing solutions.", "confidence": 0.8, "source_text_snippet": "Our experiments show Method X significantly outperforms..."},
-            {"claim_id": "arxiv:test001_claim_2", "text": "The use of CNNs was crucial for this improvement.", "confidence": 0.7, "source_text_snippet": "Ablation studies confirmed CNNs were crucial..."}
+            {"claim_id": "arxiv:test001_claim_1", "text": "Method X significantly outperforms existing solutions.", "confidence": 0.8, "source_text_snippet": "Our experiments show Method X significantly outperforms other methods in terms of accuracy and speed."},
+            {"claim_id": "arxiv:test001_claim_2", "text": "The use of CNNs was crucial for this improvement.", "confidence": 0.7, "source_text_snippet": "Ablation studies confirmed CNNs were crucial for the observed performance gain."},
+            {"claim_id": "arxiv:test001_claim_3", "text": "This approach is limited by dataset size.", "confidence": 0.65, "source_text_snippet": "However, this approach is limited by the availability of large labeled datasets."}
         ]
     }
     # Sample paper data from LiteratureHunter
