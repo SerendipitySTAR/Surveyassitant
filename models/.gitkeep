@@ -1,0 +1,3 @@
+# This file ensures the models directory is tracked by git.
+# Models should be placed in this directory, potentially organized by subdirectories.
+# Refer to config.yaml for model paths.

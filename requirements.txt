@@ -1,0 +1,69 @@
+# Core Python and System Utilities
+psutil # For system resource monitoring (memory, CPU cores)
+PyYAML # For loading config.yaml
+
+# Numerical and Data Handling
+numpy # Often a dependency for ML libraries, good to have
+
+# NLP and Machine Learning - Core Models & Processing
+# Actual model libraries will be more specific, these are common ones.
+# sentence-transformers # For bge-large-en-v1.5 embedding model (and others)
+# llama-cpp-python # For running GGUF models like Qwen2.5-7B-Chat locally
+# torch # PyTorch, often a dependency for sentence-transformers and other LLMs/fact-checkers
+# transformers # HuggingFace library, might be used by FactLLM or SciBERT
+
+# Vector Database
+# faiss-cpu # For FAISS vector index (CPU version). Use faiss-gpu if GPU is intended and setup.
+# OR
+# faiss-gpu # If a GPU setup is targeted. Requires CUDA. Choose one.
+
+# Knowledge Graph
+networkx # For graph operations (Knowledge Graph, Evidence Chains)
+
+# Database
+# sqlite3 is part of Python standard library, no need to list.
+
+# Web Interaction (for LiteratureHunter - actual implementation might need more)
+# requests # For making HTTP requests to APIs (arXiv, PubMed, etc.)
+# beautifulsoup4 # For parsing HTML if web scraping is involved
+# feedparser # For parsing RSS/Atom feeds (e.g., arXiv new submissions)
+
+# Plagiarism Detection (LSH)
+# datasketch # For MinHash and LSH, if used for plagiarism_detector
+
+# Visualization (for WritingEngine and EvidenceBuilder)
+matplotlib # For static plots
+plotly # For interactive plots
+# pyvis # For interactive networkx graph visualizations (used in EvidenceBuilder example)
+
+# Caching
+diskcache # For caching results of expensive operations (e.g., paper analysis)
+
+# Templating (for WritingEngine)
+Jinja2 # For Markdown/LaTeX template rendering
+
+# Development & Testing (Optional, but good practice)
+# pytest
+# flake8
+# black
+
+# NOTE: Some libraries are commented out.
+# This is because their full implementation is pending, and installing them
+# prematurely might be heavy or platform-dependent (e.g., faiss-gpu, torch with CUDA).
+# The user should uncomment and install them as these features are built out.
+# For Phase 1, only a few are strictly necessary for the placeholders to run without import errors
+# if the actual imports were active. For now, with placeholders, even fewer are critical.
+
+# Minimal set for current placeholders to run (if imports were active for core types):
+# (Most heavy ML libs are stubbed out in placeholders, so not strictly needed yet)
+
+# For now, let's keep it minimal and add as we truly need them for non-placeholder code.
+# The initial set to make utils.py and basic placeholders work without errors:
+# psutil
+# PyYAML
+# numpy (often good to have early)
+# networkx (for graph placeholders)
+# diskcache (for cache placeholders)
+# Jinja2 (for WritingEngine placeholder)
+# matplotlib (for WritingEngine placeholder)
+# plotly (for WritingEngine placeholder)

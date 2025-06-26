@@ -1,0 +1,88 @@
+# Configuration file for SurveyAssistant
+
+# Paths to AI models. These are placeholders and should be updated
+# to actual paths where models are stored or will be downloaded.
+# The directory structure /models/model_name is a suggestion.
+models:
+  embedding:
+    name: "bge-large-en-v1.5"  # From README
+    path: "models/bge-large-en-v1.5" # Example path, actual model files would be here
+    quantized: true           # From README
+    # Parameters for SentenceTransformer or other embedding libraries
+    # e.g., normalize_embeddings: true
+
+  llm:
+    name: "Qwen2.5-7B-Chat"    # From README
+    # Path to the GGUF file for llama-cpp-python or similar C++ based inference engines
+    path: "models/qwen2_5-7b-chat-Q8_0.gguf" # From README
+    context_size: 8192        # n_ctx, from README (llm.context)
+    # Parameters for llama-cpp-python
+    n_gpu_layers: 0           # Default to 0 (CPU), can be overridden by ResourceTracker/dynamic scheduling. Set to -1 for max.
+    n_threads: null           # null means auto, or set a specific number. Will be determined by get_available_cores() if null.
+    # Other potential params: temperature, top_p, etc.
+
+  fact_check:
+    name: "FactLLM"             # From README
+    path: "models/factllm-3b" # From README
+    # Parameters for the fact-checking model/library
+
+# Caching directories
+cache:
+  base_dir: "cache/"
+  analysis_cache_dir: "cache/analysis_results/" # For DeepAnalyzer outputs
+  knowledge_graph_path: "cache/knowledge_graph.graphml"
+  vector_store_path: "cache/vector_store.faiss"
+  sqlite_db_path: "cache/app_database.sqlite" # General app DB, including citations
+  checkpoint_dir: "cache/checkpoints/"
+
+# Literature Discovery Settings
+literature_sources:
+  arxiv:
+    enabled: true
+    max_results_per_query: 50
+  pubmed:
+    enabled: true
+    max_results_per_query: 50
+    # email_for_api: "your_email@example.com" # NCBI requires email for E-utilities
+  # semantic_scholar:
+  #   enabled: false
+  #   api_key: "YOUR_SEMANTIC_SCHOLAR_API_KEY" # If using authenticated endpoints
+
+# Output Settings
+output_dir: "output/"
+output_formats: # For WritingEngine, defining what can be generated
+  pdf: true
+  markdown: true
+  docx: false # Requires pandoc or similar, placeholder
+
+# Workflow Settings
+workflow:
+  max_iterations: 3 # Default max iterations for refinement loop in enhanced_workflow
+  quality_threshold: 0.90 # Default overall score to aim for (can be overridden by roadmap)
+  # priority_paper_limit: 5 # How many papers to deeply analyze per iteration by default
+
+# Resource Management (can be used by ResourceTracker or adaptive_inference)
+resource_options:
+  # Default GPU usage preference if not overridden by environment variables or dynamic checks
+  # true = try to use GPU, false = prefer CPU
+  # This is a high-level preference; actual use depends on hardware and library capabilities.
+  prefer_gpu: false # Set to true if you generally want to try GPU first
+  # Memory thresholds for mode switching (examples, can be tuned)
+  # high_memory_threshold_gb: 30 # For "batch_processing_mode"
+  # low_memory_threshold_gb: 12  # Below this might trigger "lean_safety_mode"
+
+# Logging (conceptual - actual logging setup would be in Python)
+logging:
+  level: "INFO" # DEBUG, INFO, WARNING, ERROR
+  log_file: "logs/survey_assistant.log"
+
+# Add any other global configurations needed by the modules
+# Example: API keys (though these are better managed via environment variables or a .env file)
+# api_keys:
+#   some_service: "YOUR_API_KEY_HERE"
+
+# Ensure models directory exists if not using absolute paths for models above.
+# It's recommended to use full paths or a clear base path environment variable for models.
+# Example: MODELS_BASE_DIR=/path/to/your/models/
+# Then in code: models_base = os.getenv("MODELS_BASE_DIR", "models/")
+#              llm_path = os.path.join(models_base, config['models']['llm']['path'])

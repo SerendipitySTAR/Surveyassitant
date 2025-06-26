@@ -1,0 +1,2 @@
+# This file ensures the cache directory is tracked by git.
+# This directory will be used by diskcache and other caching mechanisms.
