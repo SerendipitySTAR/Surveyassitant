@@ -1,192 +1,307 @@
-from ..knowledge_base.knowledge_base import KnowledgeBase
+# from ..knowledge_base.knowledge_base import KnowledgeBase # Import when KB is more functional
+import logging
+from collections import Counter, defaultdict
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeWeaver:
-    def __init__(self, kb: KnowledgeBase):
+    def __init__(self, kb=None, initial_query:str=""): # kb: KnowledgeBase
         """
         Initializes the KnowledgeWeaver.
-        kb: KnowledgeBase instance, potentially used for broader context, definitions, or relationships.
+        kb: KnowledgeBase instance, for broader context, definitions, or relationships.
+        initial_query: The initial user query that started the workflow, for context.
         """
-        self.kb = kb
-        print("KnowledgeWeaver initialized. (Placeholder)")
+        self.kb = kb # Not used extensively in this version
+        self.initial_query = initial_query
+        logger.info("KnowledgeWeaver initialized.")
 
-    def _group_and_theme_insights(self, analyzed_insights: list[dict]) -> list[dict]:
+    def _extract_keywords_from_insights(self, evidence_packages: list[dict], top_n_keywords=5) -> list[str]:
         """
-        Groups analyzed insights into themes or topics.
-        Placeholder: Simple grouping if possible, or returns a flat structure.
+        Extracts common keywords from contributions and methodologies of analyzed papers.
+        This is a simple approach; more advanced would use TF-IDF or actual NLP keyword extraction.
         """
-        print(f"KnowledgeWeaver: Grouping {len(analyzed_insights)} insights into themes. (Placeholder)")
-        if not analyzed_insights:
+        all_terms = []
+        for pkg in evidence_packages:
+            analysis_summary = pkg.get("original_analysis_summary", {})
+
+            # Add methodologies
+            all_terms.extend([m.lower() for m in analysis_summary.get("methodologies", [])])
+
+            # Add terms from contributions (simple split for now)
+            for contrib in analysis_summary.get("contributions", []):
+                all_terms.extend([word.lower() for word in contrib.split() if len(word) > 3]) # Basic filter
+
+        if not all_terms:
             return []
 
-        # In a real system, this would involve:
-        # - Clustering claims or summaries from `analyzed_insights`.
-        # - Using NLP to identify common topics or methodologies.
-        # - Leveraging the KnowledgeBase (self.kb) for existing topic models or ontologies.
+        # Get most common terms
+        common_terms = [term for term, count in Counter(all_terms).most_common(top_n_keywords)]
+        return common_terms
 
-        # Placeholder: Create a couple of dummy themes.
-        # Assume each insight package from EvidenceBuilder has 'original_analysis' > 'methodologies_used' or 'key_contributions'
+    def _group_and_theme_insights(self, evidence_packages: list[dict]) -> list[dict]:
+        """
+        Groups evidence packages into themes based on shared methodologies or keywords.
+        This is a rule-based theming approach. More advanced would use clustering on embeddings.
+        """
+        logger.info(f"KnowledgeWeaver: Grouping {len(evidence_packages)} evidence packages into themes.")
+        if not evidence_packages:
+            return []
 
-        themes_map = {} # theme_name -> {summary_points: [], papers: [], has_quantitative_data: False}
+        # Theming strategy:
+        # 1. Primary: Group by the first methodology listed if available and common.
+        # 2. Secondary: If no clear methodology groups, try to find common keywords from claims/contributions.
+        # For this version, let's simplify and use the primary methodology as the theme name.
 
-        for insight_pkg in analyzed_insights:
-            paper_id = insight_pkg.get("paper_id", "UnknownPaper")
-            analysis = insight_pkg.get("original_analysis", {})
+        themes_map = defaultdict(lambda: {"theme_name": "", "summary_points": [], "papers_in_theme": [], "paper_titles_in_theme": [], "has_quantitative_data": False, "representative_keywords": []})
 
-            # Use methodologies as a simple way to form themes for placeholder
-            methodologies = analysis.get("methodologies_used", ["General Topic"])
-            theme_name = methodologies[0] if methodologies else "General Insights" # Use first methodology as theme
+        for pkg in evidence_packages:
+            paper_id = pkg.get("paper_id", "UnknownPaper")
+            paper_title = pkg.get("title", "Untitled Paper")
+            analysis_summary = pkg.get("original_analysis_summary", {})
+            methodologies = analysis_summary.get("methodologies", [])
 
-            if theme_name not in themes_map:
-                themes_map[theme_name] = {
-                    "theme_name": theme_name,
-                    "summary_points": [],
-                    "papers_in_theme": [],
-                    "has_quantitative_data": False # Could be inferred from 'experimental_results_summary'
-                }
+            # Use the first methodology as a theme candidate, or "General Research" if none.
+            # A more robust approach would be to use all methodologies and see which ones form significant clusters.
+            theme_candidate = methodologies[0] if methodologies else "General Research Insights"
 
-            themes_map[theme_name]["papers_in_theme"].append(paper_id)
-            contributions = analysis.get("key_contributions", [])
+            # Normalize theme names a bit (e.g. "CNN" and "Convolutional Neural Network" could be merged by a more advanced system)
+            # For now, exact match.
+            current_theme_map = themes_map[theme_candidate]
+            current_theme_map["theme_name"] = theme_candidate # Set it if first time
+
+            current_theme_map["papers_in_theme"].append(paper_id)
+            current_theme_map["paper_titles_in_theme"].append(paper_title)
+
+            # Add first contribution as a summary point for the theme
+            contributions = analysis_summary.get("contributions", [])
             if contributions:
-                 themes_map[theme_name]["summary_points"].append(f"From {paper_id}: {contributions[0]}") # Add first contribution
+                 current_theme_map["summary_points"].append(f"Paper '{paper_title}' ({paper_id}) reports: {contributions[0]}")
 
-            if "results_summary" in analysis.get("experimental_results_summary", "").lower(): # Simple check
-                 themes_map[theme_name]["has_quantitative_data"] = True
+            # Check for quantitative data (very basic check based on DeepAnalyzer's output)
+            if "outperform" in analysis_summary.get("summary","").lower() or \
+               "accuracy of" in analysis_summary.get("summary","").lower() or \
+               analysis_summary.get("experimental_results_summary"): # If DeepAnalyzer provided one
+                 current_theme_map["has_quantitative_data"] = True
+
+            # Collect keywords for the theme (e.g. from claims or methodologies)
+            # For now, just add the paper's own methodologies to the theme's keywords
+            current_theme_map["representative_keywords"].extend(methodologies)
 
 
-        grouped_themes = []
+        # Post-process themes
+        final_themes = []
         for theme_name, data in themes_map.items():
-            grouped_themes.append({
+            # Create a concise summary for the theme
+            theme_summary = f"This theme focuses on {theme_name}, covering {len(data['papers_in_theme'])} paper(s). "
+            if data["summary_points"]:
+                theme_summary += "Key aspects include: " + "; ".join(data["summary_points"][:2]) # Max 2 points for brevity
+                if len(data["summary_points"]) > 2: theme_summary += "..."
+            else:
+                theme_summary += "It explores various applications and findings related to this area."
+
+            # Get unique, top N keywords for the theme
+            if data["representative_keywords"]:
+                top_theme_keywords = [kw for kw, count in Counter(data["representative_keywords"]).most_common(3)]
+            else:
+                top_theme_keywords = []
+
+            final_themes.append({
                 "theme_name": theme_name,
-                "summary": ". ".join(data["summary_points"]) if data["summary_points"] else f"Key insights related to {theme_name}.",
-                "papers_in_theme": list(set(data["papers_in_theme"])),
-                "has_quantitative_data": data["has_quantitative_data"]
+                "theme_summary": theme_summary,
+                "papers_in_theme": list(set(data["papers_in_theme"])), # Unique paper IDs
+                "paper_titles_in_theme": list(set(data["paper_titles_in_theme"])),
+                "has_quantitative_data": data["has_quantitative_data"],
+                "representative_keywords": top_theme_keywords
             })
 
-        if not grouped_themes and analyzed_insights: # Fallback if no themes created
+        if not final_themes and evidence_packages: # Fallback if no themes created (e.g. all "General Research")
+            logger.warning("Could not form distinct themes; creating a general summary theme.")
+            all_paper_ids = [pkg.get("paper_id") for pkg in evidence_packages]
+            all_paper_titles = [pkg.get("title") for pkg in evidence_packages]
+            # Basic check if any package indicates quantitative data
+            has_quant_data_overall = any(pkg.get("original_analysis_summary",{}).get("experimental_results_summary","") for pkg in evidence_packages)
+
             return [{
                 "theme_name": "Overall Summary of Findings",
-                "summary": "Aggregated insights from all analyzed papers.",
-                "papers_in_theme": [pkg.get("paper_id") for pkg in analyzed_insights],
-                "has_quantitative_data": any(pkg.get("original_analysis",{}).get("experimental_results_summary") for pkg in analyzed_insights)
+                "theme_summary": f"Aggregated insights from {len(evidence_packages)} analyzed papers.",
+                "papers_in_theme": all_paper_ids,
+                "paper_titles_in_theme": all_paper_titles,
+                "has_quantitative_data": has_quant_data_overall,
+                "representative_keywords": self._extract_keywords_from_insights(evidence_packages, 3)
             }]
 
-        return grouped_themes
+        logger.info(f"Formed {len(final_themes)} themes.")
+        return final_themes
 
 
-    def generate_report(self, analyzed_insights: list[dict]) -> dict:
+    def generate_report(self, evidence_packages: list[dict], query_context:str = None) -> dict:
         """
-        Integrates and synthesizes knowledge from various analyzed papers/evidence packages.
-        analyzed_insights: A list of "evidence packages" from the EvidenceBuilder.
-                           Each package corresponds to one paper's analysis and verification.
+        Integrates and synthesizes knowledge from various evidence packages.
+        evidence_packages: A list of evidence packages from EvidenceBuilder.
+        query_context: The original query or refined query for context.
         Returns a structured dictionary ready for the WritingEngine.
         """
-        print(f"KnowledgeWeaver: Generating integrated report from {len(analyzed_insights)} insight packages. (Placeholder)")
+        logger.info(f"KnowledgeWeaver: Generating integrated report from {len(evidence_packages)} evidence packages.")
 
-        if not analyzed_insights:
+        # Use provided query_context or fall back to the one from init
+        current_query = query_context if query_context else self.initial_query
+
+        if not evidence_packages:
+            logger.warning("No evidence packages provided to KnowledgeWeaver. Returning empty report structure.")
             return {
-                "overall_topic": "No Insights Provided",
-                "introduction": "No analyzed insights were available to generate a report.",
-                "grouped_insights": [],
-                "key_methodologies": [],
-                "reproducibility_summary": [],
-                "conclusion": "Unable to draw conclusions due to lack of input.",
-                "source_evidence_packages": []
+                "overall_topic": current_query if current_query else "Not Specified",
+                "introduction_text": "No analyzed insights were available to generate a report.",
+                "themed_sections": [],
+                "methodology_overview": [],
+                "reproducibility_summary_data": {"checked_count":0, "reproduced_count":0, "details":[]},
+                "conclusion_text": "Unable to draw conclusions due to lack of input.",
+                "source_evidence_packages": [], # Pass through the (empty) list
+                "statistics": {"total_papers_analyzed": 0, "total_claims_processed":0}
             }
 
-        # 1. Group insights into themes (e.g., by topic, methodology, findings)
-        themed_insights = self._group_and_theme_insights(analyzed_insights)
+        # 1. Group insights into themes
+        themed_sections = self._group_and_theme_insights(evidence_packages)
 
-        # 2. Synthesize an introduction and conclusion (very basic for placeholder)
-        # Assume the overall query/topic is implicitly known or can be inferred
-        # For placeholder, we'll just use a generic statement.
-        # In a real system, this would use LLMs or summarization techniques on all insights.
+        # 2. Synthesize introduction and conclusion (placeholders for now)
+        # LLM integration point for better summarization.
+        overall_topic = f"Literature Survey on: {current_query}" if current_query else \
+                        f"Literature Survey based on {len(evidence_packages)} Analyzed Papers"
 
-        # Use the first paper's title to make the topic a bit more specific for placeholder
-        first_paper_title = analyzed_insights[0].get("original_analysis", {}).get("title", "Related Research")
-        overall_topic_guess = f"Survey on Topics Related to '{first_paper_title}'"
+        common_keywords = self._extract_keywords_from_insights(evidence_packages)
+        intro_keywords_str = f"Key themes explored include {', '.join(common_keywords)}." if common_keywords else ""
 
-        introduction = f"This report synthesizes findings from {len(analyzed_insights)} key papers. It covers several themes and methodologies identified in the literature."
-        conclusion = f"The analyzed literature indicates active research in these areas. Further investigation into cross-theme connections and emerging trends is warranted."
+        introduction_text = (f"This report synthesizes findings from {len(evidence_packages)} key academic papers "
+                             f"related to '{current_query if current_query else 'the specified research area'}'. "
+                             f"It covers {len(themed_sections)} primary themes and discusses various methodologies "
+                             f"identified in the literature. {intro_keywords_str}")
 
-        # 3. Extract common methodologies, reproducibility notes
-        all_methodologies = []
-        reproducibility_notes = []
-        for package in analyzed_insights:
-            methods = package.get("original_analysis", {}).get("methodologies_used", [])
-            all_methodologies.extend(methods)
-            repro_assess = package.get("reproducibility_assessment", {})
-            if repro_assess.get("checked_url"): # Only include if checked
-                reproducibility_notes.append({
-                    "paper_id": package.get("paper_id"),
-                    "status": "Reproducible" if repro_assess.get("reproducible") else "Not Reproduced/Issues",
-                    "score": repro_assess.get("success_rate", "N/A"),
-                    "url": repro_assess.get("checked_url")
-                })
+        conclusion_text = (f"The analyzed literature indicates active research across {len(themed_sections)} identified themes. "
+                           f"Common methodologies such as {', '.join(self._extract_all_methodologies(evidence_packages)[:3]) if self._extract_all_methodologies(evidence_packages) else 'various approaches'} are prevalent. "
+                           "Further investigation into cross-theme connections and emerging trends is warranted. "
+                           "Reproducibility remains a key aspect for future validation.")
 
-        unique_methodologies = sorted(list(set(all_methodologies)))
+
+        # 3. Aggregate common methodologies and reproducibility data
+        all_methodologies_list = self._extract_all_methodologies(evidence_packages)
+        methodology_counts = Counter(all_methodologies_list)
+        methodology_overview = [{"method": m, "count": c} for m, c in methodology_counts.most_common(10)] # Top 10
+
+        repro_summary = self._summarize_reproducibility(evidence_packages)
+
+        total_claims_processed = sum(len(pkg.get("processed_claims", [])) for pkg in evidence_packages)
 
         # 4. Structure the output for WritingEngine
         structured_report_data = {
-            "overall_topic": overall_topic_guess,
-            "introduction": introduction,
-            "grouped_insights": themed_insights, # List of themes, each with a summary & related papers
-            "key_methodologies": unique_methodologies,
-            "reproducibility_summary": reproducibility_notes,
-            "conclusion": conclusion,
-            "source_evidence_packages": analyzed_insights, # Pass through for detailed evidence in writing/validation
-            "expected_themes_count": max(3, len(themed_insights)) # For Validator's completeness check
+            "overall_topic": overall_topic,
+            "introduction_text": introduction_text,
+            "themed_sections": themed_sections, # List of themes, each with a summary & related papers
+            "methodology_overview": methodology_overview,
+            "reproducibility_summary_data": repro_summary,
+            "conclusion_text": conclusion_text,
+            "source_evidence_packages": evidence_packages, # Pass through for detailed evidence
+            "statistics": {
+                "total_papers_analyzed": len(evidence_packages),
+                "total_claims_processed": total_claims_processed,
+                "total_themes_identified": len(themed_sections)
+            }
+            # "expected_themes_count" was for Validator, might remove or make it dynamic
         }
 
-        print("KnowledgeWeaver: Integrated report structure generated.")
+        logger.info("KnowledgeWeaver: Integrated report structure generated.")
         return structured_report_data
 
-if __name__ == '__main__':
-    class MockKB_ForKW:
-        def __init__(self): print("MockKB_ForKW initialized.")
+    def _extract_all_methodologies(self, evidence_packages: list[dict]) -> list[str]:
+        """Helper to get a flat list of all methodologies mentioned."""
+        all_methods = []
+        for pkg in evidence_packages:
+            methods = pkg.get("original_analysis_summary", {}).get("methodologies", [])
+            all_methods.extend(methods)
+        return all_methods
 
-    mock_kb = MockKB_ForKW()
-    weaver = KnowledgeWeaver(kb=mock_kb)
+    def _summarize_reproducibility(self, evidence_packages: list[dict]) -> dict:
+        """Helper to summarize reproducibility information."""
+        checked_count = 0
+        reproduced_count = 0
+        details = []
+        for pkg in evidence_packages:
+            repro_assess = pkg.get("reproducibility_assessment", {})
+            if repro_assess.get("reproducible_check_attempted"):
+                checked_count += 1
+                if repro_assess.get("reproducible"):
+                    reproduced_count += 1
+                details.append({
+                    "paper_id": pkg.get("paper_id"),
+                    "title": pkg.get("title"),
+                    "checked": True,
+                    "reproduced": repro_assess.get("reproducible"),
+                    "success_rate": repro_assess.get("success_rate"),
+                    "url": repro_assess.get("checked_url")
+                })
+            # Optionally, add papers for which check was not attempted
+            # else:
+            #     details.append({"paper_id": pkg.get("paper_id"), "title": pkg.get("title"), "checked": False})
+
+        return {
+            "total_papers_checked_for_reproducibility": checked_count,
+            "total_papers_reproduced_successfully": reproduced_count,
+            "details": details # List of dicts with per-paper reproducibility info
+        }
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+
+    # Mock KB for testing
+    # class MockKB_ForKW:
+    #     def __init__(self): logger.info("MockKB_ForKW initialized.")
+    # mock_kb = MockKB_ForKW()
+
+    weaver = KnowledgeWeaver(kb=None, initial_query="AI in Healthcare") # No actual KB needed for this version
 
     # Sample data from EvidenceBuilder (list of evidence packages)
+    # Using the structure from the updated EvidenceBuilder
     mock_evidence_packages = [
-        {
-            "paper_id": "paper_X01",
-            "original_analysis": {
-                "title": "Deep Learning for Image Segmentation",
-                "methodologies_used": ["CNN", "U-Net"],
-                "key_contributions": ["Novel U-Net modification.", "Achieved 95% accuracy on Dataset MedImg."],
-                "experimental_results_summary": "Results show our U-Net variant outperforms SOTA."
+        { # Paper 1
+            "paper_id": "arxiv:001", "title": "Paper on CNNs for X-Ray Analysis",
+            "url": "http://...",
+            "original_analysis_summary": {
+                "summary": "This paper uses CNNs for X-Ray analysis.",
+                "contributions": ["Novel CNN architecture.", "90% accuracy on ChestXRay dataset."],
+                "limitations": ["Needs more diverse data."],
+                "methodologies": ["CNN", "Deep Learning", "Image Classification"]
             },
-            "verified_claims": [{"text": "U-Net variant is better.", "verification_status": "Verified"}],
-            "reproducibility_assessment": {"checked_url": "git1", "reproducible": True, "success_rate": 0.9}
+            "processed_claims": [{"text": "CNNs are effective.", "verification_status": "Verified"}],
+            "reproducibility_assessment": {"reproducible_check_attempted":True, "reproducible": True, "success_rate": 0.9, "checked_url": "git://cnn_xray"}
         },
-        {
-            "paper_id": "paper_Y02",
-            "original_analysis": {
-                "title": "Transformers in NLP",
-                "methodologies_used": ["Transformer", "BERT"],
-                "key_contributions": ["New attention mechanism for BERT.", "Improved GLUE score by 2%."],
-                "experimental_results_summary": "Results summary: Our BERT model showed improvements."
+        { # Paper 2
+            "paper_id": "pubmed:002", "title": "NLP for Patient Record Summarization",
+            "url": "http://...",
+            "original_analysis_summary": {
+                "summary": "Transformers for summarizing patient records.",
+                "contributions": ["New summarization technique using BERT.", "Reduces physician workload."],
+                "limitations": ["Requires large datasets for BERT fine-tuning."],
+                "methodologies": ["NLP", "Transformer", "BERT", "Text Summarization"]
             },
-            "verified_claims": [{"text": "BERT variant is better.", "verification_status": "Verified"}],
-            "reproducibility_assessment": {"checked_url": "git2", "reproducible": False, "success_rate": 0.3}
+            "processed_claims": [{"text": "BERT model improves summarization.", "verification_status": "Verified"}],
+            "reproducibility_assessment": {"reproducible_check_attempted":True, "reproducible": False, "success_rate": 0.4, "checked_url": "git://bert_summarizer"}
         },
-         {
-            "paper_id": "paper_Z03",
-            "original_analysis": {
-                "title": "Advanced CNN Architectures",
-                "methodologies_used": ["CNN", "ResNet"],
-                "key_contributions": ["Efficient ResNet block.", "Reduced computational cost."],
-                "experimental_results_summary": "Results summary: ResNet variant more efficient."
+        { # Paper 3
+            "paper_id": "arxiv:003", "title": "Advanced CNNs for Medical Imaging",
+            "url": "http://...",
+            "original_analysis_summary": {
+                "summary": "Further explores CNNs in medical imaging.",
+                "contributions": ["EfficientNet variant for faster processing.", "Comparable accuracy to larger models."],
+                "limitations": ["Tested only on one imaging modality."],
+                "methodologies": ["CNN", "Deep Learning", "EfficientNet"]
             },
-            "verified_claims": [{"text": "ResNet variant is efficient.", "verification_status": "Verified"}],
-            "reproducibility_assessment": {"checked_url": None} # Not checked
+            "processed_claims": [{"text": "EfficientNet variant is faster.", "verification_status": "Verified"}],
+            "reproducibility_assessment": {"reproducible_check_attempted":False, "log":"No code link found."} # Not checked
         }
     ]
 
-    report_structure = weaver.generate_report(mock_evidence_packages)
+    report_structure = weaver.generate_report(mock_evidence_packages, query_context="Applications of AI in Medical Diagnostics")
 
     print("\n--- KnowledgeWeaver Output Structure ---")
     import json
-    print(json.dumps(report_structure, indent=2))
+    print(json.dumps(report_structure, indent=2, ensure_ascii=False)) # ensure_ascii=False for readability if non-ASCII
     print("--- End of Output ---")

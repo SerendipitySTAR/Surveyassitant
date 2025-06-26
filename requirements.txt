@@ -6,6 +6,8 @@ PyYAML # For loading config.yaml
 numpy # Often a dependency for ML libraries, good to have
 
 # NLP and Machine Learning - Core Models & Processing
+nltk # Natural Language Toolkit for text processing (sentence tokenization, etc.)
+scikit-learn # For TF-IDF, keyword extraction, basic classification if needed
 # Actual model libraries will be more specific, these are common ones.
 # sentence-transformers # For bge-large-en-v1.5 embedding model (and others)
 # llama-cpp-python # For running GGUF models like Qwen2.5-7B-Chat locally
@@ -24,9 +26,9 @@ networkx # For graph operations (Knowledge Graph, Evidence Chains)
 # sqlite3 is part of Python standard library, no need to list.
 
 # Web Interaction (for LiteratureHunter - actual implementation might need more)
-# requests # For making HTTP requests to APIs (arXiv, PubMed, etc.)
-# beautifulsoup4 # For parsing HTML if web scraping is involved
-# feedparser # For parsing RSS/Atom feeds (e.g., arXiv new submissions)
+requests # For making HTTP requests to APIs (arXiv, PubMed, etc.)
+beautifulsoup4 # For parsing HTML if web scraping is involved (e.g. PubMed XML, or fallback)
+feedparser # For parsing RSS/Atom feeds (e.g., arXiv new submissions)
 
 # Plagiarism Detection (LSH)
 # datasketch # For MinHash and LSH, if used for plagiarism_detector

@@ -1,206 +1,324 @@
-# import jinja2 # For actual template rendering (Markdown/LaTeX)
-# import matplotlib.pyplot as plt # For plotting
-# import plotly.graph_objects as go # For interactive plotting
+import jinja2
+import logging
+import os
+# import matplotlib.pyplot as plt # For actual plotting, if enabled
+# import plotly.graph_objects as go # For actual interactive plotting, if enabled
 
-class WritingEngine:
-    def __init__(self, template_dir: str = "templates/"):
-        """
-        Initializes the WritingEngine.
-        template_dir: Directory where Markdown/LaTeX templates are stored.
-        """
-        self.template_dir = template_dir
-        # self.template_env = jinja2.Environment(
-        #     loader=jinja2.FileSystemLoader(self.template_dir),
-        #     autoescape=jinja2.select_autoescape(['html', 'xml', 'tex', 'md'])
-        # )
-        print(f"WritingEngine initialized. Template directory: '{template_dir}'. (Placeholder)")
+logger = logging.getLogger(__name__)
 
-    def _load_template(self, template_name: str = "default_survey_template.md"):
-        """Loads a template. Placeholder for Jinja2 or similar."""
-        # try:
-        #     return self.template_env.get_template(template_name)
-        # except jinja2.TemplateNotFound:
-        #     print(f"Warning: Template '{template_name}' not found in '{self.template_dir}'. Using default structure.")
-        #     return None # Fallback to a hardcoded structure if template missing
-        print(f"WritingEngine: Simulating loading template '{template_name}'. (Placeholder)")
-        # Return a mock template string or structure
-        return """
-# {{ report_title }}
+# Default Markdown template as a string
+DEFAULT_MARKDOWN_TEMPLATE = """
+# {{ report_data.overall_topic | default("Literature Survey") }}
 
 ## 1. Introduction
-{{ introduction_section }}
+{{ report_data.introduction_text | default("Introduction placeholder.") }}
 
 ## 2. Key Themes and Insights
-{% for theme in themes %}
-### {{ theme.title }}
-{{ theme.summary }}
-    {% if theme.visualizations %}
-    Visualizations:
-        {% for viz in theme.visualizations %}
-        - {{ viz.caption }} ({{ viz.type }})
-        {% endfor %}
-    {% endif %}
+{% if report_data.themed_sections %}
+{% for theme in report_data.themed_sections %}
+### {{ loop.index }}. {{ theme.theme_name | default("Unnamed Theme") }}
+**Summary:** {{ theme.theme_summary | default("No summary available for this theme.") }}
+**Representative Keywords:** {{ theme.representative_keywords | join(", ") if theme.representative_keywords else "N/A" }}
+**Papers Discussed:**
+{% for paper_title in theme.paper_titles_in_theme %}
+- {{ paper_title }} (ID: {{ theme.papers_in_theme[loop.index0] }})
+{% else %}
+- No specific papers listed for this theme.
 {% endfor %}
+{% if theme.visualization %}
+**Visualization:**
+![{{ theme.visualization.caption }}]({{ theme.visualization.path }})
+*{{ theme.visualization.caption }}*
+{% endif %}
+{% endfor %}
+{% else %}
+No specific themes were identified or summarized.
+{% endif %}
 
 ## 3. Methodologies Overview
-{{ methodologies_section }}
-
-## 4. Evidence and Reproducibility
-{% for item in evidence_summary %}
-**Paper: {{ item.paper_id }}**
-Claims Verified: {{ item.claims_verified_count }}
-Reproducibility: {{ item.reproducibility_status }} (Score: {{ item.reproducibility_score }})
+**Common Methodologies Identified:**
+{% if report_data.methodology_overview %}
+<ul>
+{% for method in report_data.methodology_overview %}
+  <li>{{ method.method }} ({{ method.count }} paper(s))</li>
 {% endfor %}
+</ul>
+{% else %}
+No common methodologies were explicitly aggregated.
+{% endif %}
+{% if report_data.visualizations.methodology_chart %}
+![Methodology Distribution]({{ report_data.visualizations.methodology_chart.path }})
+*{{ report_data.visualizations.methodology_chart.caption }}*
+{% endif %}
+
+## 4. Reproducibility Assessment
+**Summary:**
+- Papers checked for reproducibility: {{ report_data.reproducibility_summary_data.total_papers_checked_for_reproducibility | default(0) }}
+- Papers successfully reproduced (simulated): {{ report_data.reproducibility_summary_data.total_papers_reproduced_successfully | default(0) }}
+{% if report_data.visualizations.reproducibility_chart %}
+![Reproducibility Overview]({{ report_data.visualizations.reproducibility_chart.path }})
+*{{ report_data.visualizations.reproducibility_chart.caption }}*
+{% endif %}
+
+**Details:**
+{% if report_data.reproducibility_summary_data.details %}
+<ul>
+{% for detail in report_data.reproducibility_summary_data.details %}
+  <li>Paper: {{ detail.title | default(detail.paper_id) }}
+    <ul>
+      <li>Checked: {{ "Yes" if detail.checked else "No" }}</li>
+      {% if detail.checked %}
+      <li>Reproduced: {{ "Yes" if detail.reproduced else "No" }} (Success Rate: {{ "%.2f"|format(detail.success_rate*100) if detail.success_rate is not none else 'N/A' }}%)</li>
+      <li>Code URL: {{ detail.url if detail.url else "N/A" }}</li>
+      {% endif %}
+    </ul>
+  </li>
+{% endfor %}
+</ul>
+{% else %}
+No detailed reproducibility information available.
+{% endif %}
 
 ## 5. Conclusion
-{{ conclusion_section }}
+{{ report_data.conclusion_text | default("Conclusion placeholder.") }}
+
+## Appendix: Detailed Evidence Packages
+*(This section would typically list or link to individual evidence packages for deeper review. For brevity, it's omitted in this draft template.)*
+{#
+{% if report_data.source_evidence_packages %}
+{% for pkg in report_data.source_evidence_packages %}
+### Evidence for Paper: {{ pkg.title | default(pkg.paper_id) }}
+**Summary:** {{ pkg.original_analysis_summary.summary | default("N/A") }}
+**Contributions:** {{ pkg.original_analysis_summary.contributions | join("; ") if pkg.original_analysis_summary.contributions else "N/A" }}
+**Limitations:** {{ pkg.original_analysis_summary.limitations | join("; ") if pkg.original_analysis_summary.limitations else "N/A" }}
+**Claims Processed:** {{ pkg.processed_claims | length }}
+---
+{% endfor %}
+{% endif %}
+#}
 
 ## References
-(References section would be built here)
+*(Placeholder: A full reference list would be generated based on papers included in `source_evidence_packages`)*
+{% if report_data.source_evidence_packages %}
+{% for pkg in report_data.source_evidence_packages %}
+- {{ pkg.title | default(pkg.paper_id) }}. {{ pkg.source_url | default("") }}
+{% endfor %}
+{% endif %}
+
+---
+*Report generated by SurveyAssistant on {{ now() }}*
 """
 
-    def _generate_visualization(self, data: list, viz_type: str = "bar_chart", title: str = "Visualization") -> dict:
+
+class WritingEngine:
+    def __init__(self, template_string: str = None):
         """
-        Generates a visualization (e.g., chart, graph).
-        Placeholder: returns a mock path or description.
+        Initializes the WritingEngine.
+        template_string: An optional string containing the Jinja2 template. If None, uses DEFAULT_MARKDOWN_TEMPLATE.
         """
-        print(f"WritingEngine: Generating '{viz_type}' titled '{title}'. (Placeholder)")
-        # Example:
-        # if viz_type == "bar_chart":
-        #     plt.figure()
-        #     plt.bar([d['label'] for d in data], [d['value'] for d in data])
-        #     plt.title(title)
-        #     img_path = f"output/visualizations/{title.replace(' ', '_')}.png"
-        #     plt.savefig(img_path)
-        #     plt.close()
-        #     return {"type": "image", "path": img_path, "caption": title}
+        self.template_str = template_string if template_string else DEFAULT_MARKDOWN_TEMPLATE
+        try:
+            self.jinja_env = jinja2.Environment(loader=jinja2.BaseLoader(), autoescape=jinja2.select_autoescape(['html', 'xml', 'md']))
+            self.jinja_env.globals['now'] = jinja2.runtime.ContextVar('now', lambda: datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'))
+            self.template = self.jinja_env.from_string(self.template_str)
+            logger.info("WritingEngine initialized with Jinja2 template.")
+        except Exception as e:
+            logger.error(f"Failed to initialize Jinja2 environment: {e}")
+            self.template = None
+
+
+    def _generate_text_visualization(self, data: list, title: str, value_key:str, label_key:str, viz_type:str="bar_chart") -> dict:
+        """
+        Generates a textual representation of a visualization (e.g., a simple bar chart).
+        Actual image generation is complex for this environment and would be a separate microservice.
+        """
+        logger.info(f"Generating text visualization for '{title}' ({viz_type}).")
+
+        # For this placeholder, we'll create a mock file path and a text description
+        # In a real system, this might save an image and return its path, or save text data to a file.
+        mock_output_dir = "output/visualizations" # ensure this exists or handle creation
+        if not os.path.exists(mock_output_dir):
+            try:
+                os.makedirs(mock_output_dir)
+            except OSError as e:
+                logger.error(f"Could not create visualization directory {mock_output_dir}: {e}")
+                # Fallback to no path if dir creation fails
+                mock_output_dir = ""
+
+
+        filename_safe_title = "".join(c if c.isalnum() else "_" for c in title)
+        mock_file_path = os.path.join(mock_output_dir, f"{filename_safe_title}_{viz_type}.txt") if mock_output_dir else ""
+
+        text_viz_content = [f"--- Text Visualization: {title} ({viz_type}) ---"]
+        if not data:
+            text_viz_content.append("No data available for this visualization.")
+        elif viz_type == "bar_chart":
+            max_val = max(item.get(value_key, 0) for item in data) if data else 0
+            max_bar_len = 30 # Max characters for a bar
+            for item in sorted(data, key=lambda x: x.get(value_key, 0), reverse=True):
+                label = item.get(label_key, "N/A")
+                value = item.get(value_key, 0)
+                bar_len = int((value / max_val) * max_bar_len) if max_val > 0 else 0
+                bar = "#" * bar_len
+                text_viz_content.append(f"{label:<20} | {bar} ({value})")
+        else: # Other types just list data
+            for item in data:
+                 text_viz_content.append(f"- {item.get(label_key, 'Item')}: {item.get(value_key, 'N/A')}")
+
+        # In a real scenario, we might save this to mock_file_path
+        # For now, the path is just a reference. The content can be embedded if desired or linked.
+        # For simplicity, the current template doesn't embed this text viz, only links to the path.
+
         return {
             "type": viz_type,
-            "path": f"output/visualizations/mock_{viz_type}_{title.replace(' ', '_')}.png",
-            "caption": f"Mock {viz_type} for {title}"
+            "path": mock_file_path.replace("output/", "") if mock_file_path else "mock_viz.png", # Relative path for Markdown
+            "caption": f"Visualization of {title} ({viz_type}). Data stored at: {mock_file_path}",
+            "text_content": "\n".join(text_viz_content) # The actual text viz
         }
 
-    def compose(self, structured_report_data: dict, template_name: str = "default_survey_template.md") -> str:
+    def compose(self, structured_report_data: dict) -> str:
         """
-        Composes the literature survey draft from structured data using a template.
+        Composes the literature survey draft from structured data using the Jinja2 template.
         structured_report_data: Data from KnowledgeWeaver.
-        template_name: Name of the template file to use.
-        Returns the composed draft as a string (e.g., Markdown).
+        Returns the composed draft as a Markdown string.
         """
-        print(f"WritingEngine: Composing draft using template '{template_name}'. (Placeholder)")
+        if not self.template:
+            logger.error("Jinja2 template not loaded. Cannot compose document.")
+            return "Error: Document template not available."
 
-        # template = self._load_template(template_name)
+        logger.info(f"WritingEngine: Composing draft for topic '{structured_report_data.get('overall_topic', 'N/A')}'.")
 
-        # Mock data transformation for the placeholder template
-        # This would be more sophisticated in a real implementation, mapping KnowledgeWeaver's output
-        # to the template context.
+        # Prepare visualization data that might be generated here
+        visualizations = {}
+        if structured_report_data.get("methodology_overview"):
+            visualizations["methodology_chart"] = self._generate_text_visualization(
+                data=structured_report_data["methodology_overview"],
+                title="Methodology Distribution",
+                value_key="count",
+                label_key="method",
+                viz_type="bar_chart"
+            )
 
-        # Example of preparing context for the mock template
-        context = {
-            "report_title": structured_report_data.get("overall_topic", "Literature Survey") + " - Draft",
-            "introduction_section": structured_report_data.get("introduction", "This survey covers key advancements..."),
-            "themes": [],
-            "methodologies_section": "Various methodologies were identified...",
-            "evidence_summary": [],
-            "conclusion_section": structured_report_data.get("conclusion", "In conclusion, the field shows significant promise...")
+        repro_data_for_chart = []
+        if "total_papers_checked_for_reproducibility" in structured_report_data.get("reproducibility_summary_data", {}):
+            repro_summary = structured_report_data["reproducibility_summary_data"]
+            repro_data_for_chart = [
+                {"status": "Checked & Reproduced", "count": repro_summary.get("total_papers_reproduced_successfully",0)},
+                {"status": "Checked & Not Reproduced/Issues", "count": repro_summary.get("total_papers_checked_for_reproducibility",0) - repro_summary.get("total_papers_reproduced_successfully",0)},
+                # Could add "Not Checked" if we track total papers vs checked ones
+            ]
+            if repro_data_for_chart:
+                 visualizations["reproducibility_chart"] = self._generate_text_visualization(
+                    data=repro_data_for_chart,
+                    title="Reproducibility Overview",
+                    value_key="count",
+                    label_key="status",
+                    viz_type="bar_chart"
+                )
+
+        # Add generated visualizations to the main report data for the template
+        template_context = {
+            "report_data": structured_report_data,
+            "visualizations": visualizations # Visualizations generated by WritingEngine itself
         }
 
-        # Populate themes with potential visualizations
-        for i, insight_group in enumerate(structured_report_data.get("grouped_insights", [])):
-            theme_title = insight_group.get("theme_name", f"Key Theme {i+1}")
-            theme_summary = insight_group.get("summary", "Detailed summary of this theme...")
-            visuals = []
-            if insight_group.get("has_quantitative_data", False): # Assume KnowledgeWeaver indicates this
-                 visuals.append(self._generate_visualization(
-                    data=[{"label": "A", "value": 10}, {"label": "B", "value": 20}], # Dummy data
-                    viz_type="bar_chart",
-                    title=f"Comparison for {theme_title}"
-                ))
-            context["themes"].append({
-                "title": theme_title,
-                "summary": theme_summary,
-                "visualizations": visuals
-            })
+        # Add per-theme visualizations if 'has_quantitative_data' is true (mock for now)
+        # This part could be more sophisticated, taking actual data from themes.
+        if "themed_sections" in template_context["report_data"]:
+            for theme in template_context["report_data"]["themed_sections"]:
+                if theme.get("has_quantitative_data"): # Flag from KnowledgeWeaver
+                    # Generate a mock visualization for this theme
+                    theme_viz_data = [{"label": f"Metric A for {theme['theme_name']}", "value": random.randint(10,100)},
+                                      {"label": f"Metric B for {theme['theme_name']}", "value": random.randint(5,50)}]
+                    theme["visualization"] = self._generate_text_visualization(
+                        data=theme_viz_data,
+                        title=f"Key Metrics for {theme['theme_name']}",
+                        value_key="value",
+                        label_key="label",
+                        viz_type="bar_chart"
+                    )
 
-        # Populate evidence summary
-        for paper_package in structured_report_data.get("source_evidence_packages", []): # Assuming this structure from KW
-            verified_claims = paper_package.get("verified_claims", [])
-            repro_assess = paper_package.get("reproducibility_assessment", {})
-            context["evidence_summary"].append({
-                "paper_id": paper_package.get("paper_id", "N/A"),
-                "claims_verified_count": len([c for c in verified_claims if "Verified" in c.get("verification_status", "")]),
-                "reproducibility_status": "Checked" if repro_assess.get("checked_url") else "Not Checked",
-                "reproducibility_score": repro_assess.get("success_rate", 0.0) if repro_assess.get("reproducible") else "N/A"
-            })
 
-        # Simulate rendering (simple string formatting for placeholder)
-        # if template:
-        #     # rendered_draft = template.render(context)
-        #     # For placeholder, just join parts of context for a very basic "draft"
-        #     pass # Fall through to manual assembly for placeholder
+        try:
+            rendered_draft = self.template.render(template_context)
+            logger.info("WritingEngine: Draft composed successfully.")
+            return rendered_draft
+        except Exception as e:
+            logger.error(f"Error rendering Jinja2 template: {e}")
+            return f"Error during document composition: {e}"
 
-        # Manual assembly for placeholder if template processing is too complex here
-        draft_parts = [
-            f"# {context['report_title']}\n",
-            f"## 1. Introduction\n{context['introduction_section']}\n",
-            "## 2. Key Themes and Insights"
-        ]
-        for theme in context['themes']:
-            draft_parts.append(f"\n### {theme['title']}\n{theme['summary']}")
-            if theme['visualizations']:
-                draft_parts.append("\nVisualizations:")
-                for viz in theme['visualizations']:
-                     draft_parts.append(f"  - {viz['caption']} (Mock path: {viz['path']})")
-
-        draft_parts.append(f"\n\n## 3. Methodologies Overview\n{context['methodologies_section']}\n")
-        draft_parts.append("## 4. Evidence and Reproducibility")
-        for item in context['evidence_summary']:
-            draft_parts.append(f"\n**Paper: {item['paper_id']}**\n  Claims Verified: {item['claims_verified_count']}\n  Reproducibility: {item['reproducibility_status']} (Score: {item['reproducibility_score']})")
-
-        draft_parts.append(f"\n\n## 5. Conclusion\n{context['conclusion_section']}\n")
-        draft_parts.append("## References\n(Placeholder for reference list)")
-
-        rendered_draft = "\n".join(draft_parts)
-
-        print("WritingEngine: Draft composed.")
-        return rendered_draft
 
 if __name__ == '__main__':
-    engine = WritingEngine(template_dir="project_templates/") # Imaginary template dir
+    logging.basicConfig(level=logging.INFO)
+    engine = WritingEngine() # Uses default template
 
-    # Sample data from a (mock) KnowledgeWeaver
+    # Sample data from KnowledgeWeaver (using the structure from the updated KW)
     mock_kw_data = {
-        "overall_topic": "AI in Climate Change Mitigation",
-        "introduction": "This survey explores the role of Artificial Intelligence in addressing climate change.",
-        "grouped_insights": [
+        "overall_topic": "AI in Medical Diagnostics: A Literature Survey",
+        "introduction_text": "This report reviews recent advancements in AI for medical diagnostics, covering 15 papers. Key themes include CNNs in imaging and NLP for patient data.",
+        "themed_sections": [
             {
-                "theme_name": "Predictive Modeling for Climate Events",
-                "summary": "AI models are increasingly used for forecasting extreme weather.",
-                "has_quantitative_data": True, # Signal for visualization
-                "papers_in_theme": ["paper_A", "paper_B"]
+                "theme_name": "CNN Applications in Radiology",
+                "theme_summary": "Convolutional Neural Networks (CNNs) are widely used for analyzing radiological images. This theme covers 2 paper(s). Key aspects include: Paper 'CNNs for X-Ray Analysis' (arxiv:001) reports: Novel CNN architecture.; Paper 'Advanced CNNs for Medical Imaging' (arxiv:003) reports: EfficientNet variant for faster processing..",
+                "papers_in_theme": ["arxiv:001", "arxiv:003"],
+                "paper_titles_in_theme": ["Paper on CNNs for X-Ray Analysis", "Advanced CNNs for Medical Imaging"],
+                "has_quantitative_data": True,
+                "representative_keywords": ["CNN", "Deep Learning", "Image Classification"]
             },
             {
-                "theme_name": "Optimizing Renewable Energy Systems",
-                "summary": "Machine learning helps optimize energy grids and storage.",
-                "papers_in_theme": ["paper_C"]
+                "theme_name": "NLP for Clinical Notes",
+                "theme_summary": "Natural Language Processing (NLP) techniques, particularly Transformers like BERT, are applied to extract insights from clinical notes. This theme covers 1 paper(s). Key aspects include: Paper 'NLP for Patient Record Summarization' (pubmed:002) reports: New summarization technique using BERT..",
+                "papers_in_theme": ["pubmed:002"],
+                "paper_titles_in_theme": ["NLP for Patient Record Summarization"],
+                "has_quantitative_data": False,
+                "representative_keywords": ["NLP", "Transformer", "BERT"]
             }
         ],
-        "source_evidence_packages": [ # This would come from EvidenceBuilder, aggregated by KW
-            {
-                "paper_id": "paper_A",
-                "verified_claims": [{"verification_status": "Provisionally Verified"}, {"verification_status": "Needs More Evidence"}],
-                "reproducibility_assessment": {"checked_url": "http://...", "reproducible": True, "success_rate": 0.85}
-            },
-            {
-                "paper_id": "paper_C",
-                "verified_claims": [{"verification_status": "Provisionally Verified"}],
-                "reproducibility_assessment": {"checked_url": None} # Not checked
-            }
+        "methodology_overview": [
+            {"method": "CNN", "count": 2},
+            {"method": "Deep Learning", "count": 2},
+            {"method": "NLP", "count": 1},
+            {"method": "Transformer", "count": 1},
         ],
-        "conclusion": "AI offers powerful tools for climate action, but challenges remain."
+        "reproducibility_summary_data": {
+            "total_papers_checked_for_reproducibility": 2,
+            "total_papers_reproduced_successfully": 1,
+            "details": [
+                {"paper_id": "arxiv:001", "title": "Paper on CNNs for X-Ray Analysis", "checked": True, "reproduced": True, "success_rate": 0.9, "url": "git://cnn_xray"},
+                {"paper_id": "pubmed:002", "title": "NLP for Patient Record Summarization", "checked": True, "reproduced": False, "success_rate": 0.4, "url": "git://bert_summarizer"},
+                 {"paper_id": "arxiv:003", "title": "Advanced CNNs for Medical Imaging", "checked": False} # Example of not checked
+            ]
+        },
+        "conclusion_text": "AI shows great promise in medical diagnostics, with CNNs and NLP leading the way. Reproducibility and data diversity are key challenges.",
+        "source_evidence_packages": [ # Abbreviated for this test
+            {"paper_id": "arxiv:001", "title": "Paper on CNNs for X-Ray Analysis", "source_url": "http://arxiv.org/abs/001"},
+            {"paper_id": "pubmed:002", "title": "NLP for Patient Record Summarization", "source_url": "http://pubmed.gov/002"},
+            {"paper_id": "arxiv:003", "title": "Advanced CNNs for Medical Imaging", "source_url": "http://arxiv.org/abs/003"}
+        ],
+        "statistics": {"total_papers_analyzed": 3, "total_claims_processed": 5, "total_themes_identified": 2}
     }
 
     draft = engine.compose(mock_kw_data)
     print("\n--- Composed Draft (Markdown) ---")
     print(draft)
     print("\n--- End of Draft ---")
+
+    # Test visualization text output (internal detail, but can be useful)
+    # if engine.template : # Check if template loaded
+    #     viz_text_meth = engine._generate_text_visualization(
+    #         data=mock_kw_data["methodology_overview"],
+    #         title="Methodology Test", value_key="count", label_key="method"
+    #     )
+    #     print("\n--- Sample Text Visualization (Methodologies) ---")
+    #     print(viz_text_meth["text_content"])
+
+    #     repro_chart_data = [
+    #         {"status": "Reproduced", "count": mock_kw_data["reproducibility_summary_data"]["total_papers_reproduced_successfully"]},
+    #         {"status": "Not Reproduced", "count": mock_kw_data["reproducibility_summary_data"]["total_papers_checked_for_reproducibility"] - mock_kw_data["reproducibility_summary_data"]["total_papers_reproduced_successfully"]}
+    #     ]
+    #     viz_text_repro = engine._generate_text_visualization(
+    #         data=repro_chart_data,
+    #         title="Reproducibility Test", value_key="count", label_key="status"
+    #     )
+    #     print("\n--- Sample Text Visualization (Reproducibility) ---")
+    #     print(viz_text_repro["text_content"])

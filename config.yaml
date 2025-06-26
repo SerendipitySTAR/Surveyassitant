@@ -43,7 +43,9 @@ literature_sources:
   pubmed:
     enabled: true
     max_results_per_query: 50
-    # email_for_api: "your_email@example.com" # NCBI requires email for E-utilities
+    email_for_api: "surveyassistant.dev@example.com" # Default email for NCBI E-utilities
+    api_key: null # Placeholder for NCBI API key. If user has one, they can put it here.
+                  # Using null or leaving it out means no API key will be sent.
   # semantic_scholar:
   #   enabled: false
   #   api_key: "YOUR_SEMANTIC_SCHOLAR_API_KEY" # If using authenticated endpoints
