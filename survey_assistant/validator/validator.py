@@ -64,28 +64,63 @@ class FactCheckModel:
         claims_data: Optional list of claim dicts (e.g., from EvidenceBuilder) to check.
         Returns a dictionary with consistency scores or findings.
         """
-        logger.info(f"FactCheckModel: Simulating factual consistency evaluation.")
+        logger.info(f"FactCheckModel: Simulating factual consistency evaluation for text or {len(claims_data) if claims_data else 0} claims.")
 
-        # If specific claims are provided, we might simulate checking each one.
-        # For now, use a general score for the whole text_content.
+        issues_found = [] # Initialize issues_found at the beginning of the method
+        processed_claims_details = []
+        individual_consistency_scores = []
 
-        # Simulate model inference for overall consistency
-        overall_consistency_score = round(random.uniform(0.70, 0.95), 3) # Mostly consistent
+        if claims_data:
+            for i, claim_info in enumerate(claims_data):
+                claim_text = claim_info.get("text", "")
+                # Simulate checking each claim
+                claim_score = round(random.uniform(0.65, 0.98), 3) # Simulate score for this specific claim
+                individual_consistency_scores.append(claim_score)
 
-        issues_found = []
-        if overall_consistency_score < 0.80: # If score is not very high
-            issues_found.append({
-                "statement_snippet": text_content[:100] + "..." if text_content else "N/A", # Example snippet
-                "issue_description": "Minor inconsistency or low confidence area detected (simulated).",
-                "severity_level": "Low" if overall_consistency_score > 0.75 else "Medium",
-                "suggestion": "Review this section for clarity and supporting evidence."
-            })
+                claim_status = "Supported" if claim_score > 0.85 else \
+                               "Neutral/Needs Evidence" if claim_score > 0.7 else \
+                               "Potentially Contradicted"
 
-        logger.debug(f"FactCheckModel: Simulated overall consistency score: {overall_consistency_score}")
+                issue = None
+                if claim_status != "Supported":
+                    issue = {
+                        "original_claim_id": claim_info.get("claim_id", f"claim_idx_{i}"),
+                        "claim_text_snippet": claim_text[:100] + "...",
+                        "issue_description": f"Claim consistency simulated as '{claim_status}'. Confidence: {claim_score}",
+                        "severity_level": "Medium" if "Contradicted" in claim_status else "Low",
+                        "suggestion": "Verify this claim against source or provide stronger evidence."
+                    }
+                    if not issue in issues_found: issues_found.append(issue)
+
+
+                processed_claims_details.append({
+                    "original_claim_id": claim_info.get("claim_id", f"claim_idx_{i}"),
+                    "claim_text": claim_text,
+                    "simulated_check_score": claim_score,
+                    "simulated_status": claim_status
+                })
+
+            if individual_consistency_scores:
+                overall_consistency_score = round(sum(individual_consistency_scores) / len(individual_consistency_scores), 3)
+            else: # No claims to check, fall back to text_content check or default.
+                overall_consistency_score = round(random.uniform(0.70, 0.95), 3) # Default if no claims
+        else:
+            # Fallback: General check on the whole text_content if no specific claims provided
+            overall_consistency_score = round(random.uniform(0.70, 0.95), 3)
+            if overall_consistency_score < 0.80:
+                 issues_found.append({
+                    "statement_snippet": text_content[:100] + "..." if text_content else "N/A",
+                    "issue_description": "General text consistency check: Minor inconsistency or low confidence area detected (simulated).",
+                    "severity_level": "Low" if overall_consistency_score > 0.75 else "Medium",
+                    "suggestion": "Review overall document for clarity and supporting evidence."
+                })
+
+        logger.debug(f"FactCheckModel: Simulated overall consistency score: {overall_consistency_score}, based on {len(processed_claims_details)} claims or general text.")
         return {
             "overall_consistency_score": overall_consistency_score,
-            "issues_identified": issues_found,
-            "model_confidence_on_assessment": round(random.uniform(0.85, 0.99), 2) # Confidence of this assessment
+            "issues_identified": issues_found, # List of specific issues found
+            "checked_claims_details": processed_claims_details, # Details if claims were checked
+            "model_confidence_on_assessment": round(random.uniform(0.85, 0.99), 2)
         }
 
 class Validator:
@@ -207,7 +242,20 @@ class Validator:
         # 2. Fact Consistency Check (using placeholder model)
         # For a more targeted check, one might pass specific claims from `structured_data_from_weaver`
         # (e.g., from `source_evidence_packages.processed_claims`) to the fact_checker.
-        fact_check_results = self.fact_checker.evaluate(draft_text) # General check on draft
+
+        # Extract claims from structured_data_from_weaver to pass to fact_checker
+        all_processed_claims = []
+        if structured_data_from_weaver and "source_evidence_packages" in structured_data_from_weaver:
+            for pkg in structured_data_from_weaver["source_evidence_packages"]:
+                all_processed_claims.extend(pkg.get("processed_claims", []))
+
+        if all_processed_claims:
+            logger.info(f"Validator: Passing {len(all_processed_claims)} extracted claims to FactCheckModel.")
+            fact_check_results = self.fact_checker.evaluate(draft_text, claims_data=all_processed_claims)
+        else:
+            logger.info("Validator: No specific claims found in structured data. FactCheckModel will evaluate general draft text.")
+            fact_check_results = self.fact_checker.evaluate(draft_text) # General check on draft
+
         fact_consistency_score = fact_check_results.get("overall_consistency_score", 0.0)
 
         # 3. Academic Norms / Formatting Check
@@ -291,7 +339,22 @@ if __name__ == '__main__':
         ],
         "methodology_overview": [{"method": "CNN", "count":1}, {"method":"Transformer", "count":1}],
         "statistics": {"total_themes_identified": 2},
-        "conclusion_text": "AI is evolving..."
+        "conclusion_text": "AI is evolving...",
+        "source_evidence_packages": [ # Added to test claim passing to FactCheckModel
+            {
+                "paper_id": "arxiv:sample001",
+                "processed_claims": [
+                    {"claim_id": "claim1", "text": "CNNs are effective for X-Ray analysis."},
+                    {"claim_id": "claim2", "text": "Our model achieved 95% accuracy."}
+                ]
+            },
+            {
+                "paper_id": "pubmed:sample002",
+                "processed_claims": [
+                    {"claim_id": "claim3", "text": "Transformers can summarize patient records."}
+                ]
+            }
+        ]
     }
 
     print("\n--- Evaluating Good Draft ---")

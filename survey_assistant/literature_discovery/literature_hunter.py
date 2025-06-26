@@ -2,6 +2,7 @@ import requests
 import feedparser
 import time
 import logging
+import re # Added for query cleaning
 from urllib.parse import quote_plus
 from datetime import datetime
 import xml.etree.ElementTree as ET # For parsing PubMed XML
@@ -55,7 +56,12 @@ class LiteratureHunter:
         # Replace special characters and encode query for URL
         # Using 'all:' prefix for a general search query.
         # More complex queries can be built: https://arxiv.org/help/api/user-manual#query_details
-        search_query = f"all:{quote_plus(query)}"
+
+        # Simple cleaning for iterative refinement patterns
+        cleaned_query = re.sub(r'\s*\(iterative refinement\)\s*$', '', query, flags=re.IGNORECASE).strip()
+        cleaned_query = re.sub(r'\s*\(refined search\)\s*$', '', cleaned_query, flags=re.IGNORECASE).strip()
+
+        search_query = f"all:{quote_plus(cleaned_query)}"
 
         # Other params: sortBy (relevance, lastUpdatedDate, submittedDate), sortOrder (ascending, descending)
         params = {
@@ -149,9 +155,13 @@ class LiteratureHunter:
 
         papers = []
 
+        # Simple cleaning for iterative refinement patterns
+        cleaned_query = re.sub(r'\s*\(iterative refinement\)\s*$', '', query, flags=re.IGNORECASE).strip()
+        cleaned_query = re.sub(r'\s*\(refined search\)\s*$', '', cleaned_query, flags=re.IGNORECASE).strip()
+
         esearch_params = {
             "db": "pubmed",
-            "term": query,
+            "term": cleaned_query,
             "retmax": max_results,
             "usehistory": "y", # To use history for efetch
             "tool": "SurveyAssistant", # As per NCBI guidelines

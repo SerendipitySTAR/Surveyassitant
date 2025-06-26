@@ -126,12 +126,43 @@ class DeepAnalyzer:
         elif prompt_type == "extract_contributions":
             return ["[LLM Contribution Placeholder 1]", "[LLM Contribution Placeholder 2]"]
         # Add more types as needed
-        return "LLM Placeholder: No specific output."
+        # In a real scenario, this would involve formatting a prompt, sending to an LLM API or local model,
+        # and parsing the response.
+        # For simulation, we generate plausible-looking but fixed/randomized output.
+
+        if prompt_type == "summarize_abstract":
+            # Simulate a concise summary
+            summary_sentences = text_section.split('.')[:2] # Take first two sentences as a base
+            return f"[Simulated LLM Summary]: {' '.join(s.strip() for s in summary_sentences if s.strip())}."
+
+        elif prompt_type == "extract_contributions":
+            # Simulate extracting a few bullet points
+            return [
+                "[Simulated LLM] Contribution: Developed a novel XYZ technique.",
+                "[Simulated LLM] Contribution: Achieved SOTA results on Benchmark A.",
+                f"[Simulated LLM] Contribution: Reduced computational cost by X% for '{text_section[:20]}...'"
+            ]
+
+        elif prompt_type == "extract_limitations":
+            return [
+                "[Simulated LLM] Limitation: Study was conducted on a limited dataset.",
+                f"[Simulated LLM] Limitation: Generalizability to other domains not explored for '{text_section[:20]}...'"
+            ]
+
+        elif prompt_type == "extract_future_work":
+            return [
+                "[Simulated LLM] Future Work: Explore scalability of the proposed method.",
+                f"[Simulated LLM] Future Work: Apply technique to real-world problem Y related to '{text_section[:20]}...'"
+            ]
+
+        logger.warning(f"Unknown prompt_type '{prompt_type}' for LLM simulation.")
+        return "LLM Simulation: No specific output for this prompt type."
 
 
     def run(self) -> dict:
         """
-        Performs deep analysis on the paper's abstract using rule-based methods.
+        Performs deep analysis on the paper's abstract using a combination of
+        rule-based methods and simulated LLM calls.
         """
         paper_id = self.paper_data.get('id', 'Unknown ID')
         title = self.paper_data.get('title', 'N/A')
@@ -141,7 +172,6 @@ class DeepAnalyzer:
 
         if not abstract:
             logger.warning(f"No abstract found for paper {paper_id}. Analysis will be limited.")
-            # Return a minimal structure or the placeholder if no abstract
             return {
                 "paper_id": paper_id, "title": title, "structured_summary": "N/A - No abstract provided.",
                 "key_contributions": [], "limitations": [], "methodologies_used": [],
@@ -151,21 +181,28 @@ class DeepAnalyzer:
 
         sentences = self._nltk_sentence_tokenize(abstract)
 
-        # Define patterns for keyword-based extraction
-        # These regex patterns are examples and would need refinement.
+        # LLM-simulated extractions (preferred if available, fallback to regex/keywords)
+        # For now, we'll assume LLM simulation provides the primary content for these.
+        structured_summary = self._extract_llm_placeholder(abstract, "summarize_abstract")
+        key_contributions_llm = self._extract_llm_placeholder(abstract, "extract_contributions")
+        limitations_llm = self._extract_llm_placeholder(abstract, "extract_limitations")
+        future_work_llm = self._extract_llm_placeholder(abstract, "extract_future_work")
+
+        # Keyword-based extraction for things LLM might not focus on or as fallback
         extraction_patterns = {
-            "key_contributions": [
-                r"our main contribution", r"we propose", r"novel method", r"key finding",
-                r"we introduce", r"this paper presents", r"significantly improves"
-            ],
-            "limitations": [
-                r"limitation of this study", r"however,.*limited to", r"future work should address",
-                r"drawback is", r"one challenge is", r"does not consider"
-            ],
-            "future_work_suggestions": [
-                r"future work", r"further research", r"potential extension", r"next steps involve"
-            ],
-            "experimental_results_summary_indicators": [ # Sentences that might talk about results
+            # Contributions/limitations might be superseded by LLM, but keep for robustness/detail
+            # "key_contributions_regex": [
+            #     r"our main contribution", r"we propose", r"novel method", r"key finding",
+            #     r"we introduce", r"this paper presents", r"significantly improves"
+            # ],
+            # "limitations_regex": [
+            #     r"limitation of this study", r"however,.*limited to", r"future work should address",
+            #     r"drawback is", r"one challenge is", r"does not consider"
+            # ],
+            # "future_work_suggestions_regex": [
+            #     r"future work", r"further research", r"potential extension", r"next steps involve"
+            # ],
+            "experimental_results_summary_indicators": [
                 r"results show", r"experiments demonstrate", r"achieved an accuracy of", r"outperformed",
                 r"validate our approach", r"evaluation reveals"
             ],
@@ -174,54 +211,37 @@ class DeepAnalyzer:
                 r"using the .* dataset"
             ]
         }
+        extracted_keyword_sections = self._extract_by_keywords(sentences, extraction_patterns)
 
-        extracted_sections = self._extract_by_keywords(sentences, extraction_patterns)
+        experimental_results_summary = " ".join(extracted_keyword_sections.get("experimental_results_summary_indicators", []))
 
-        # Consolidate results (simple concatenation for now)
-        # For results/datasets, these are just indicative sentences, not structured data.
-        experimental_results_summary = " ".join(extracted_sections.get("experimental_results_summary_indicators", []))
-        datasets_used_hints = extracted_sections.get("datasets_used_indicators", [])
-
-        # More sophisticated dataset extraction would parse specific names.
-        # For placeholder, just list sentences that hint at datasets.
         datasets_identified = []
-        for hint_sentence in datasets_used_hints:
-            # Try to find capitalized words or phrases that might be dataset names
-            # This is very naive. NER or more specific patterns would be better.
+        for hint_sentence in extracted_keyword_sections.get("datasets_used_indicators", []):
             matches = re.findall(r"([A-Z][A-Za-z0-9]*(?:[\s-][A-Z][A-Za-z0-9]*)* dataset)", hint_sentence)
             if matches:
                 datasets_identified.extend([m.replace(" dataset", "") for m in matches])
-            else: # If no specific "X Dataset" pattern, add the sentence as a general hint
-                if len(hint_sentence) < 100: # Keep it brief
-                     datasets_identified.append(f"Hint: {hint_sentence}")
+            elif len(hint_sentence) < 100: # Keep it brief if no specific pattern
+                 datasets_identified.append(f"Hint: {hint_sentence}")
 
-
-        # Methodologies: Use paper keywords (like arXiv categories or MeSH terms) + common list
         paper_keywords = self.paper_data.get('keywords', []) + self.paper_data.get('categories', []) + self.paper_data.get('mesh_terms', [])
         methodologies = self._extract_methodologies(abstract, paper_keywords)
 
-        # Potential Claims
         potential_claims = self._identify_potential_claims(sentences, paper_id)
-
-        # Structured Summary (very basic for now)
-        # Replace with LLM call in future: self._extract_llm_placeholder(abstract, "summarize_abstract")
-        structured_summary = self._generate_structured_summary(sentences)
-
 
         analysis_result = {
             "paper_id": paper_id,
             "title": title,
-            "structured_summary": structured_summary,
-            "key_contributions": extracted_sections.get("key_contributions", []),
-            "limitations": extracted_sections.get("limitations", []),
-            "methodologies_used": methodologies,
-            "datasets_used": list(set(datasets_identified)) if datasets_identified else [], # Unique dataset mentions
-            "experimental_results_summary": experimental_results_summary if experimental_results_summary else "Not explicitly extracted.",
-            "potential_claims": potential_claims,
-            "future_work_suggestions": extracted_sections.get("future_work_suggestions", [])
+            "structured_summary": structured_summary, # Primarily from LLM sim
+            "key_contributions": key_contributions_llm if isinstance(key_contributions_llm, list) else [key_contributions_llm],
+            "limitations": limitations_llm if isinstance(limitations_llm, list) else [limitations_llm],
+            "methodologies_used": methodologies, # Still regex/keyword based
+            "datasets_used": list(set(datasets_identified)) if datasets_identified else [],
+            "experimental_results_summary": experimental_results_summary if experimental_results_summary else "Not explicitly extracted by keyword patterns.",
+            "potential_claims": potential_claims, # Still regex/keyword based
+            "future_work_suggestions": future_work_llm if isinstance(future_work_llm, list) else [future_work_llm]
         }
 
-        logger.info(f"DeepAnalyzer: Analysis complete for '{title}'. Found {len(potential_claims)} potential claims.")
+        logger.info(f"DeepAnalyzer: Analysis complete for '{title}'. Found {len(potential_claims)} potential claims (rule-based). LLM parts simulated.")
         return analysis_result
 
 if __name__ == '__main__':

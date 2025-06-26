@@ -1,6 +1,7 @@
 import jinja2
 import logging
 import os
+from datetime import datetime # Ensure datetime is imported
 # import matplotlib.pyplot as plt # For actual plotting, if enabled
 # import plotly.graph_objects as go # For actual interactive plotting, if enabled
 
@@ -46,18 +47,18 @@ No specific themes were identified or summarized.
 {% else %}
 No common methodologies were explicitly aggregated.
 {% endif %}
-{% if report_data.visualizations.methodology_chart %}
-![Methodology Distribution]({{ report_data.visualizations.methodology_chart.path }})
-*{{ report_data.visualizations.methodology_chart.caption }}*
+{% if visualizations.methodology_chart %}
+![Methodology Distribution]({{ visualizations.methodology_chart.path }})
+*{{ visualizations.methodology_chart.caption }}*
 {% endif %}
 
 ## 4. Reproducibility Assessment
 **Summary:**
 - Papers checked for reproducibility: {{ report_data.reproducibility_summary_data.total_papers_checked_for_reproducibility | default(0) }}
 - Papers successfully reproduced (simulated): {{ report_data.reproducibility_summary_data.total_papers_reproduced_successfully | default(0) }}
-{% if report_data.visualizations.reproducibility_chart %}
-![Reproducibility Overview]({{ report_data.visualizations.reproducibility_chart.path }})
-*{{ report_data.visualizations.reproducibility_chart.caption }}*
+{% if visualizations.reproducibility_chart %}
+![Reproducibility Overview]({{ visualizations.reproducibility_chart.path }})
+*{{ visualizations.reproducibility_chart.caption }}*
 {% endif %}
 
 **Details:**
@@ -119,7 +120,8 @@ class WritingEngine:
         self.template_str = template_string if template_string else DEFAULT_MARKDOWN_TEMPLATE
         try:
             self.jinja_env = jinja2.Environment(loader=jinja2.BaseLoader(), autoescape=jinja2.select_autoescape(['html', 'xml', 'md']))
-            self.jinja_env.globals['now'] = jinja2.runtime.ContextVar('now', lambda: datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'))
+            # Add 'now' as a global function available in templates
+            self.jinja_env.globals['now'] = lambda: datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
             self.template = self.jinja_env.from_string(self.template_str)
             logger.info("WritingEngine initialized with Jinja2 template.")
         except Exception as e:

@@ -9,10 +9,10 @@ numpy # Often a dependency for ML libraries, good to have
 nltk # Natural Language Toolkit for text processing (sentence tokenization, etc.)
 scikit-learn # For TF-IDF, keyword extraction, basic classification if needed
 # Actual model libraries will be more specific, these are common ones.
-# sentence-transformers # For bge-large-en-v1.5 embedding model (and others)
-# llama-cpp-python # For running GGUF models like Qwen2.5-7B-Chat locally
-# torch # PyTorch, often a dependency for sentence-transformers and other LLMs/fact-checkers
-# transformers # HuggingFace library, might be used by FactLLM or SciBERT
+sentence-transformers # For bge-large-en-v1.5 embedding model (and others)
+llama-cpp-python # For running GGUF models like Qwen2.5-7B-Chat locally
+torch # PyTorch, often a dependency for sentence-transformers and other LLMs/fact-checkers
+transformers # HuggingFace library, might be used by FactLLM or SciBERT
 
 # Vector Database
 # faiss-cpu # For FAISS vector index (CPU version). Use faiss-gpu if GPU is intended and setup.
