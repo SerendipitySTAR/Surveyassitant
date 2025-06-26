@@ -3,23 +3,103 @@ from .knowledge_base.knowledge_base import KnowledgeBase
 from .literature_discovery.literature_hunter import LiteratureHunter # Placeholder
 from .deep_analysis.deep_analyzer import DeepAnalyzer # Placeholder
 from .evidence_builder.evidence_builder import EvidenceBuilder # Placeholder
-from .knowledge_weaver.knowledge_weaver import KnowledgeWeaver # Placeholder
-from .writing_engine.writing_engine import WritingEngine # Placeholder
-from .validator.validator import Validator # Placeholder
+from .knowledge_weaver.knowledge_weaver import KnowledgeWeaver
+from .writing_engine.writing_engine import WritingEngine
+from .validator.validator import Validator
+from .utils import ensure_dir_exists, load_config # Added ensure_dir_exists
+import os
+import json # For saving JSON validation report
+import logging # For logging file save operations
+from datetime import datetime # Added import
 
-def format_output(draft, validation_report):
+logger = logging.getLogger(__name__)
+
+
+def format_output(main_report_data: dict, # This is now the structured data from KW
+                  validation_report: dict,
+                  query: str,
+                  writing_engine: WritingEngine) -> dict:
     """
-    Formats the final output package.
-    Placeholder implementation.
+    Formats the final output package, generating Markdown, LaTeX, and simulating DOCX/PDF.
+    Saves outputs to files based on README structure.
+
+    Args:
+        main_report_data (dict): Structured data from KnowledgeWeaver.
+        validation_report (dict): Report from Validator.
+        query (str): The original query for naming.
+        writing_engine (WritingEngine): Instance of the WritingEngine.
+
+    Returns:
+        A dictionary summarizing the output paths and messages.
     """
-    print("Formatting output...")
-    # In a real scenario, this would create the directory structure and files
-    # as specified in "输出成果体系" in README.md
-    return {
-        "main_report_draft": draft,
-        "validation_summary": validation_report,
-        "status": "OutputFormatted"
+    logger.info("Formatting final output package...")
+
+    config = load_config()
+    base_output_dir = config.get("output_dir", "output")
+
+    # Sanitize query for use in filenames
+    safe_query_name = "".join(c if c.isalnum() else "_" for c in query[:50]) # Limit length
+    timestamp_str = validation_report.get('evaluation_timestamp', datetime.utcnow().isoformat()).split('T')[0]
+
+    # Simplified output for testing sandbox limits
+    simple_output_dir = os.path.join(base_output_dir, f"survey_run_{safe_query_name}_{timestamp_str}")
+    ensure_dir_exists(simple_output_dir)
+
+    output_summary = {
+        "package_directory": simple_output_dir,
+        "files_generated": [],
+        "messages": []
     }
+
+    # 1. Generate and save Markdown report (simplified path)
+    try:
+        md_content = writing_engine.compose(main_report_data, output_format="markdown")
+        md_filepath = os.path.join(simple_output_dir, f"{safe_query_name}_survey.md")
+        with open(md_filepath, "w", encoding="utf-8") as f:
+            f.write(md_content)
+        output_summary["files_generated"].append({"format": "Markdown", "path": md_filepath})
+        logger.info(f"Markdown report saved to: {md_filepath}")
+
+        # Simulate DOCX by saving the MD file that would be converted
+        docx_sim_md_path = os.path.join(simple_output_dir, f"{safe_query_name}_for_docx.md")
+        docx_sim_result = writing_engine.to_docx_simulation(md_content, docx_sim_md_path)
+        output_summary["messages"].append(docx_sim_result["message"])
+        if docx_sim_result.get("success"):
+             output_summary["files_generated"].append({"format": "DOCX_Simulation_MD", "path": docx_sim_result["markdown_filepath"]})
+
+    except Exception as e:
+        logger.error(f"Error generating Markdown or simulating DOCX: {e}")
+        output_summary["messages"].append(f"Error (MD/DOCX): {e}")
+
+    # 2. Generate and save LaTeX report (simplified path)
+    try:
+        latex_content = writing_engine.compose(main_report_data, output_format="latex")
+        tex_filepath = os.path.join(simple_output_dir, f"{safe_query_name}_survey.tex")
+        with open(tex_filepath, "w", encoding="utf-8") as f:
+            f.write(latex_content)
+        output_summary["files_generated"].append({"format": "LaTeX", "path": tex_filepath})
+        logger.info(f"LaTeX report saved to: {tex_filepath}")
+
+        pdf_sim_result = writing_engine.to_pdf_simulation(latex_content, tex_filepath)
+        output_summary["messages"].append(pdf_sim_result["message"])
+
+    except Exception as e:
+        logger.error(f"Error generating LaTeX or simulating PDF: {e}")
+        output_summary["messages"].append(f"Error (LaTeX/PDF): {e}")
+
+    # 3. Save Validation Report (simplified path)
+    try:
+        val_report_filepath = os.path.join(simple_output_dir, f"{safe_query_name}_validation_report.json")
+        with open(val_report_filepath, "w", encoding="utf-8") as f:
+            json.dump(validation_report, f, indent=2, ensure_ascii=False)
+        output_summary["files_generated"].append({"format": "ValidationReport_JSON", "path": val_report_filepath})
+        logger.info(f"Validation report saved to: {val_report_filepath}")
+    except Exception as e:
+        logger.error(f"Error saving validation report: {e}")
+        output_summary["messages"].append(f"Error (Validation Report): {e}")
+
+    return output_summary
+
 
 def select_priority_papers(papers: list, criteria: dict = None) -> list:
     """
@@ -139,27 +219,29 @@ def enhanced_workflow(query: str, max_iterations=3):
                 workflow_iteration += 1
             else:
                 print("Max iterations reached. Outputting current best effort.")
-                final_output = format_output(draft_document, validation_report)
+                # Pass integrated_report_data (from KW) to format_output, not just one rendered draft
+                final_output_summary = format_output(integrated_report_data, validation_report, query, writing_engine)
                 kb.close_databases()
-                return {"status": "completed_max_iterations", "output": final_output, "query": query}
+                return {"status": "completed_max_iterations", "output_summary": final_output_summary, "query": query}
         else:
             print(f"Quality threshold met or exceeded. Overall score: {validation_report.get('overall_score', 0)}")
-            final_output = format_output(draft_document, validation_report)
+            final_output_summary = format_output(integrated_report_data, validation_report, query, writing_engine)
             kb.close_databases()
-            return {"status": "completed_successfully", "output": final_output, "query": query}
+            return {"status": "completed_successfully", "output_summary": final_output_summary, "query": query}
 
     # Fallback if loop finishes due to max_iterations without explicit success
-    print("Max iterations reached. Workflow finished.")
+    # This part should ideally be covered by the logic within the loop's final iteration.
+    # If loop finishes, it means the last iteration's draft_document and validation_report are the final ones.
+    logger.info("Max iterations reached by falling through loop. Workflow finished.")
     kb.close_databases()
-    # This part might not be reached if returns are handled inside the loop for final states.
-    # Consider the last generated draft and validation if loop finishes by iteration count.
-    # This depends on whether the last iteration produced a draft and validation.
-    # For safety, ensure draft_document and validation_report are defined or handled.
-    if 'draft_document' in locals() and 'validation_report' in locals():
-        final_output = format_output(draft_document, validation_report)
-        return {"status": "completed_max_iterations_fallback", "output": final_output, "query": query}
-    else:
-        return {"status": "failed_unexpected_finish", "reason": "Workflow ended without producing a final draft.", "query": query}
+
+    # Check if final data for formatting exists (it should if loop ran at least once)
+    if 'integrated_report_data' in locals() and 'validation_report' in locals() and 'writing_engine' in locals():
+        final_output_summary = format_output(integrated_report_data, validation_report, query, writing_engine)
+        return {"status": "completed_max_iterations_fallback", "output_summary": final_output_summary, "query": query}
+    else: # Should not happen if workflow ran through at least one paper analysis cycle
+        logger.error("Workflow ended unexpectedly without producing necessary data for final output formatting.")
+        return {"status": "failed_unexpected_finish", "reason": "Workflow ended without producing a final draft or necessary data.", "query": query}
 
 
 if __name__ == '__main__':

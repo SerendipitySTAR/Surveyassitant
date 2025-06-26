@@ -1,0 +1,39 @@
+{
+  "overall_score": 0.828,
+  "plagiarism_score": 0.051,
+  "fact_consistency_score": 0.744,
+  "credibility_score_derived": 0.7060559999999999,
+  "novelty_score_simulated": 0.72,
+  "fact_check_details": {
+    "overall_consistency_score": 0.744,
+    "issues_identified": [
+      {
+        "statement_snippet": "\n# Literature Survey based on 5 Analyzed Papers\n\n## 1. Introduction\nThis report synthesizes findings...",
+        "issue_description": "General text consistency check: Minor inconsistency or low confidence area detected (simulated).",
+        "severity_level": "Medium",
+        "suggestion": "Review overall document for clarity and supporting evidence."
+      }
+    ],
+    "checked_claims_details": [],
+    "model_confidence_on_assessment": 0.95
+  },
+  "format_score": 0.8,
+  "format_details": {
+    "format_score": 0.8,
+    "sections_found": {
+      "Introduction": true,
+      "Methodology": true,
+      "Results": false,
+      "Conclusion": true,
+      "References": true
+    },
+    "missing_sections": [
+      "Results"
+    ]
+  },
+  "completeness_score": 1.0,
+  "weak_areas_identified": [
+    "Low Factual Consistency (Score: 0.74)"
+  ],
+  "evaluation_timestamp": "2025-06-26T12:43:09.707680Z"
+}

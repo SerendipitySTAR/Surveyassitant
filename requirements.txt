@@ -43,6 +43,7 @@ diskcache # For caching results of expensive operations (e.g., paper analysis)
 
 # Templating (for WritingEngine)
 Jinja2 # For Markdown/LaTeX template rendering
+pypandoc # For potential Markdown to other format conversions (if Pandoc is installed)
 
 # Development & Testing (Optional, but good practice)
 # pytest
