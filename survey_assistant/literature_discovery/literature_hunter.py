@@ -8,19 +8,37 @@ from datetime import datetime
 import xml.etree.ElementTree as ET # For parsing PubMed XML
 
 # Assuming utils.py is in survey_assistant package, one level up
-from ..utils import load_config
+from ..utils import load_config # For cache directory from config
+import os # For path operations for cache
+from diskcache import Cache # For API call caching
 
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Initialize cache for LiteratureHunter API calls
+config = load_config()
+cache_base_dir = config.get("cache", {}).get("base_dir", "cache")
+lh_cache_dir = os.path.join(cache_base_dir, "literature_hunter_api")
+if not os.path.exists(lh_cache_dir):
+    try:
+        os.makedirs(lh_cache_dir)
+    except OSError as e:
+        logger.error(f"Could not create cache directory {lh_cache_dir}: {e}")
+        lh_cache_dir = os.path.join(cache_base_dir, "lh_temp_default")
+        if not os.path.exists(lh_cache_dir): os.makedirs(lh_cache_dir, exist_ok=True)
+# Cache API responses for 1 day (24 * 60 * 60 seconds)
+api_cache = Cache(lh_cache_dir, expire=24 * 60 * 60, tag_index=True)
+
+
 class LiteratureHunter:
     def __init__(self, user_agent="SurveyAssistant/0.1"):
         self.user_agent = user_agent
-        self.config = load_config() # Load global config
+        # Config is already loaded at module level for cache setup
+        # self.config = load_config()
 
-        pubmed_config = self.config.get("literature_sources", {}).get("pubmed", {})
+        pubmed_config = config.get("literature_sources", {}).get("pubmed", {})
         self.pubmed_api_key = pubmed_config.get("api_key") # NCBI API key
         self.pubmed_email = pubmed_config.get("email_for_api", "surveyassistant@example.com") # Default email
 
@@ -28,7 +46,7 @@ class LiteratureHunter:
             "arxiv": self._fetch_arxiv,
             "pubmed": self._fetch_pubmed,
         }
-        logger.info(f"LiteratureHunter initialized with User-Agent: {self.user_agent}. PubMed API key configured: {'Yes' if self.pubmed_api_key else 'No'}")
+        logger.info(f"LiteratureHunter initialized with User-Agent: {self.user_agent}. PubMed API key configured: {'Yes' if self.pubmed_api_key else 'No'}. API Cache at: {lh_cache_dir}")
 
     def _parse_kpi_target(self, kpi_target: str) -> int:
         default_papers = 50
@@ -66,21 +84,37 @@ class LiteratureHunter:
         # Other params: sortBy (relevance, lastUpdatedDate, submittedDate), sortOrder (ascending, descending)
         params = {
             "search_query": search_query,
-            "start": 0,
+            "start": 0, # Note: Caching needs to consider pagination if start > 0
             "max_results": max_results,
             "sortBy": "relevance"
         }
 
+        # Use a combination of query and key params for the cache key
+        cache_key = f"arxiv_{cleaned_query}_{max_results}_{params['sortBy']}"
+
+        cached_response_content = api_cache.get(cache_key)
+
+        if cached_response_content:
+            logger.info(f"Cache HIT for arXiv query: '{query}'. Parsing from cache.")
+            response_content = cached_response_content
+        else:
+            logger.info(f"Cache MISS for arXiv query: '{query}'. Querying API.")
+            try:
+                response = requests.get(base_url, params=params, headers={"User-Agent": self.user_agent}, timeout=15) # Added timeout
+                response.raise_for_status()
+                response_content = response.content
+                api_cache.set(cache_key, response_content) # Cache the raw byte content
+                # arXiv API guidelines: wait 3 seconds between requests.
+                time.sleep(1) # Being polite. More critical if making many unique calls.
+            except requests.exceptions.RequestException as e:
+                logger.error(f"arXiv API request failed for query '{query}': {e}")
+                return []
+
         papers = []
         try:
-            logger.info(f"Querying arXiv: {query} (max_results={max_results})")
-            response = requests.get(base_url, params=params, headers={"User-Agent": self.user_agent})
-            response.raise_for_status() # Raise HTTPError for bad responses (4XX or 5XX)
-
-            feed = feedparser.parse(response.content)
-
-            if feed.bozo: # Check if feedparser encountered issues
-                 logger.warning(f"Feedparser encountered issues parsing arXiv response. Bozo type: {feed.bozo_exception}")
+            feed = feedparser.parse(response_content)
+            if feed.bozo:
+                 logger.warning(f"Feedparser encountered issues parsing arXiv response (key: {cache_key}). Bozo type: {feed.bozo_exception}")
 
             for entry in feed.entries:
                 arxiv_id = entry.get("id", "").split('/')[-1] # e.g. http://arxiv.org/abs/2303.00001v1 -> 2303.00001v1
@@ -170,17 +204,27 @@ class LiteratureHunter:
         if self.pubmed_api_key:
             esearch_params["api_key"] = self.pubmed_api_key
 
+        esearch_cache_key = f"pubmed_esearch_{cleaned_query}_{max_results}"
+        cached_esearch_content = api_cache.get(esearch_cache_key)
+        response_esearch_content = None
+
+        if cached_esearch_content:
+            logger.info(f"Cache HIT for PubMed esearch: '{query}'. Parsing from cache.")
+            response_esearch_content = cached_esearch_content
+        else:
+            logger.info(f"Cache MISS for PubMed esearch: '{query}'. Querying API.")
+            try:
+                response_esearch = requests.get(base_esearch_url, params=esearch_params, headers={"User-Agent": self.user_agent}, timeout=15)
+                response_esearch.raise_for_status()
+                response_esearch_content = response_esearch.content
+                api_cache.set(esearch_cache_key, response_esearch_content)
+                time.sleep(0.2 if self.pubmed_api_key else 0.4)
+            except requests.exceptions.RequestException as e:
+                logger.error(f"PubMed esearch API request failed for query '{query}': {e}")
+                return []
+
         try:
-            logger.info(f"Querying PubMed (esearch): {query} (max_results={max_results})")
-            response_esearch = requests.get(base_esearch_url, params=esearch_params, headers={"User-Agent": self.user_agent})
-            response_esearch.raise_for_status()
-
-            # NCBI recommends not hitting the API more than 3 times per second without an API key,
-            # or 10 times per second with an API key.
-            time.sleep(0.2 if self.pubmed_api_key else 0.4)
-
-            esearch_root = ET.fromstring(response_esearch.content)
-
+            esearch_root = ET.fromstring(response_esearch_content)
             id_list = [id_elem.text for id_elem in esearch_root.findall(".//IdList/Id")]
             if not id_list:
                 logger.info(f"No PubMed IDs found for query '{query}'.")
@@ -207,29 +251,39 @@ class LiteratureHunter:
                     efetch_params_no_history["api_key"] = self.pubmed_api_key
 
                 logger.info(f"PubMed esearch did not return WebEnv/QueryKey. Fetching {len(id_list)} PMIDs directly.")
-                response_efetch = requests.get(base_efetch_url, params=efetch_params_no_history, headers={"User-Agent": self.user_agent})
-
+                efetch_api_params = efetch_params_no_history
             else: # Use history
-                efetch_params = {
-                    "db": "pubmed",
-                    "WebEnv": web_env.text,
-                    "query_key": query_key.text,
-                    "retstart": 0,
-                    "retmax": len(id_list), # Fetch all IDs found by esearch up to max_results
-                    "retmode": "xml", # Abstract and metadata
-                    "tool": "SurveyAssistant",
-                    "email": self.pubmed_email
+                efetch_api_params = {
+                    "db": "pubmed", "WebEnv": web_env.text, "query_key": query_key.text,
+                    "retstart": 0, "retmax": len(id_list), "retmode": "xml",
+                    "tool": "SurveyAssistant", "email": self.pubmed_email
                 }
-                if self.pubmed_api_key:
-                    efetch_params["api_key"] = self.pubmed_api_key
-
+                if self.pubmed_api_key: efetch_api_params["api_key"] = self.pubmed_api_key
                 logger.info(f"Querying PubMed (efetch) for {len(id_list)} PMIDs using history.")
-                response_efetch = requests.get(base_efetch_url, params=efetch_params, headers={"User-Agent": self.user_agent})
 
-            response_efetch.raise_for_status()
-            time.sleep(0.2 if self.pubmed_api_key else 0.4)
+            # Caching for efetch (based on sorted list of IDs to ensure consistent key)
+            sorted_id_string = ",".join(sorted(id_list))
+            efetch_cache_key = f"pubmed_efetch_{hash(sorted_id_string)}" # Hash long string of IDs
 
-            efetch_root = ET.fromstring(response_efetch.content)
+            cached_efetch_content = api_cache.get(efetch_cache_key)
+            response_efetch_content = None
+
+            if cached_efetch_content:
+                logger.info(f"Cache HIT for PubMed efetch (IDs: {sorted_id_string[:50]}...). Parsing from cache.")
+                response_efetch_content = cached_efetch_content
+            else:
+                logger.info(f"Cache MISS for PubMed efetch (IDs: {sorted_id_string[:50]}...). Querying API.")
+                try:
+                    response_efetch = requests.get(base_efetch_url, params=efetch_api_params, headers={"User-Agent": self.user_agent}, timeout=30) # Longer timeout for potentially many IDs
+                    response_efetch.raise_for_status()
+                    response_efetch_content = response_efetch.content
+                    api_cache.set(efetch_cache_key, response_efetch_content)
+                    time.sleep(0.2 if self.pubmed_api_key else 0.4)
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"PubMed efetch API request failed for IDs '{sorted_id_string[:50]}...': {e}")
+                    return [] # Return empty if efetch fails
+
+            efetch_root = ET.fromstring(response_efetch_content)
 
             for article_elem in efetch_root.findall(".//PubmedArticle"):
                 pmid_elem = article_elem.find(".//MedlineCitation/PMID")

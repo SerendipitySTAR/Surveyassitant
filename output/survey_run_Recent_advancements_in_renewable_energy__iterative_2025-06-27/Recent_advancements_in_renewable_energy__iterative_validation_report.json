@@ -1,0 +1,30 @@
+{
+  "overall_score": 0.855,
+  "plagiarism_score": 0.074,
+  "fact_consistency_score": 0.948,
+  "credibility_score_derived": 0.877848,
+  "novelty_score_simulated": 0.64,
+  "fact_check_details": {
+    "overall_consistency_score": 0.948,
+    "issues_identified": [],
+    "checked_claims_details": [],
+    "model_confidence_on_assessment": 0.96
+  },
+  "format_score": 0.8,
+  "format_details": {
+    "format_score": 0.8,
+    "sections_found": {
+      "Introduction": true,
+      "Methodology": true,
+      "Results": false,
+      "Conclusion": true,
+      "References": true
+    },
+    "missing_sections": [
+      "Results"
+    ]
+  },
+  "completeness_score": 1.0,
+  "weak_areas_identified": [],
+  "evaluation_timestamp": "2025-06-27T09:36:47.127378Z"
+}

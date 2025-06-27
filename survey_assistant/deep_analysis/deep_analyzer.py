@@ -1,12 +1,33 @@
 import nltk
 import re
 import logging
-# from sklearn.feature_extraction.text import TfidfVectorizer # For more advanced keyword extraction
-# from ..knowledge_base.knowledge_base import KnowledgeBase # May need KB for context
+import os # Added for path operations
+# from sklearn.feature_extraction.text import TfidfVectorizer
+# from ..knowledge_base.knowledge_base import KnowledgeBase
+from diskcache import Cache
+from ..utils import load_config # For cache directory from config
 
 logger = logging.getLogger(__name__)
 
-# Ensure NLTK sentence tokenizer is available (download if first time)
+# Initialize cache for DeepAnalyzer results
+# Cache directory can be configured via config.yaml
+config = load_config()
+cache_base_dir = config.get("cache", {}).get("base_dir", "cache")
+analysis_cache_dir = config.get("cache", {}).get("analysis_cache_dir", os.path.join(cache_base_dir, "analysis"))
+# Ensure directory exists (utils.ensure_dir_exists could be used if module load order allows)
+if not os.path.exists(analysis_cache_dir):
+    try:
+        os.makedirs(analysis_cache_dir)
+    except OSError as e:
+        logger.error(f"Could not create cache directory {analysis_cache_dir}: {e}")
+        # Fallback to a temporary cache or disable caching if dir creation fails
+        analysis_cache_dir = os.path.join(cache_base_dir, "analysis_temp_default") # Default temp if error
+        if not os.path.exists(analysis_cache_dir): os.makedirs(analysis_cache_dir, exist_ok=True)
+
+analysis_cache = Cache(analysis_cache_dir)
+
+
+# Ensure NLTK sentence tokenizer is available
 # Moved to a global setup step in the main workflow or agent initialization.
 # try:
 #     nltk.data.find('tokenizers/punkt')
@@ -158,20 +179,21 @@ class DeepAnalyzer:
         logger.warning(f"Unknown prompt_type '{prompt_type}' for LLM simulation.")
         return "LLM Simulation: No specific output for this prompt type."
 
-
-    def run(self) -> dict:
+    # The main run method will call this internal, memoized method.
+    # The cache key will be based on paper_id.
+    # Note: If paper_data content (other than ID) could change for the same ID,
+    # this caching strategy would be problematic. Assuming paper_id uniquely identifies content.
+    @analysis_cache.memoize(tag="deep_analysis_v1") # Added tag for versioning cache
+    def _perform_analysis_memoized(self, paper_id: str, title: str, abstract: str, keywords: list, categories: list, mesh_terms: list) -> dict:
         """
-        Performs deep analysis on the paper's abstract using a combination of
-        rule-based methods and simulated LLM calls.
+        Internal method that performs the actual analysis. This method is memoized.
+        All data relevant for analysis that comes from self.paper_data must be passed as arguments
+        to ensure the cache key is comprehensive.
         """
-        paper_id = self.paper_data.get('id', 'Unknown ID')
-        title = self.paper_data.get('title', 'N/A')
-        abstract = self.paper_data.get('abstract', '')
+        logger.info(f"DeepAnalyzer (Cache Miss): Performing analysis for '{title}' (ID: {paper_id}).")
 
-        logger.info(f"DeepAnalyzer: Running analysis on '{title}' (ID: {paper_id}).")
-
-        if not abstract:
-            logger.warning(f"No abstract found for paper {paper_id}. Analysis will be limited.")
+        if not abstract: # Should be caught by caller, but double check.
+            logger.warning(f"No abstract provided for paper {paper_id} to _perform_analysis_memoized.")
             return {
                 "paper_id": paper_id, "title": title, "structured_summary": "N/A - No abstract provided.",
                 "key_contributions": [], "limitations": [], "methodologies_used": [],
@@ -244,49 +266,99 @@ class DeepAnalyzer:
         logger.info(f"DeepAnalyzer: Analysis complete for '{title}'. Found {len(potential_claims)} potential claims (rule-based). LLM parts simulated.")
         return analysis_result
 
+    def run(self) -> dict:
+        """
+        Public method to run analysis. It retrieves paper data from self.paper_data
+        and calls the memoized internal method.
+        """
+        paper_id = self.paper_data.get('id', 'Unknown ID')
+        title = self.paper_data.get('title', 'N/A')
+        abstract = self.paper_data.get('abstract', '')
+
+        # For robust caching, ensure all relevant parts of paper_data used by
+        # _perform_analysis_memoized are passed to it.
+        keywords = self.paper_data.get('keywords', [])
+        categories = self.paper_data.get('categories', [])
+        mesh_terms = self.paper_data.get('mesh_terms', [])
+
+        logger.info(f"DeepAnalyzer: Requesting analysis for '{title}' (ID: {paper_id}). Checking cache...")
+
+        # Handle case where abstract is missing before calling memoized function
+        if not abstract:
+            logger.warning(f"No abstract found for paper {paper_id} in run(). Analysis will be limited.")
+            return {
+                "paper_id": paper_id, "title": title, "structured_summary": "N/A - No abstract provided.",
+                "key_contributions": [], "limitations": [], "methodologies_used": [],
+                "datasets_used": [], "experimental_results_summary": "N/A",
+                "potential_claims": [], "future_work_suggestions": []
+            }
+
+        # Call the memoized method
+        # The cache key will be formed from these arguments.
+        result = self._perform_analysis_memoized(paper_id, title, abstract, keywords, categories, mesh_terms)
+
+        # Check if the result came from cache by inspecting logs or by a more direct way if diskcache offered it.
+        # For now, the logger message inside _perform_analysis_memoized indicates a cache miss.
+        # A simple way to check for hit (outside of diskcache's own logging which isn't easily captured here):
+        # If the "Cache Miss" log for this paper_id for this run doesn't appear a second time, it was a hit.
+        return result
+
+
 if __name__ == '__main__':
     # Setup basic logging for standalone run
     logging.basicConfig(level=logging.INFO)
+    logger.info("NLTK 'punkt' and 'stopwords' should be pre-downloaded for DeepAnalyzer.")
+    # Example: nltk.download('punkt'); nltk.download('stopwords')
 
-    sample_paper_1 = {
-        "id": "arxiv:sample001",
+    sample_paper_1_data = {
+        "id": "arxiv:sample001_v2", # Changed ID to test caching
         "title": "A Novel Method for Topic Modeling using Deep Learning",
         "abstract": ("This paper presents a novel method for topic modeling. Our main contribution is a new neural architecture "
                      "that significantly improves coherence scores. We evaluated on the 20 Newsgroups dataset. "
                      "Results show our approach outperforms existing state-of-the-art methods by 15%. "
                      "A limitation of this study is its computational cost. Future work should explore efficiency."),
         "keywords": ["topic modeling", "deep learning", "neural networks"],
-        "categories": ["cs.AI", "cs.LG"]
+        "categories": ["cs.AI", "cs.LG"],
+        "mesh_terms": []
     }
-    analyzer1 = DeepAnalyzer(paper_data=sample_paper_1)
-    result1 = analyzer1.run()
+    analyzer1 = DeepAnalyzer(paper_data=sample_paper_1_data)
 
-    print("\n--- Deep Analysis Result 1 ---")
+    print("\n--- Deep Analysis Result 1 (Run 1) ---")
+    result1_run1 = analyzer1.run()
     import json
-    print(json.dumps(result1, indent=2))
+    print(json.dumps(result1_run1, indent=2))
 
-    sample_paper_2 = {
-        "id": "pubmed:sample002",
+    print("\n--- Deep Analysis Result 1 (Run 2 - Should be cached) ---")
+    # If caching works, the "_perform_analysis_memoized" log for "Cache Miss" should not appear here.
+    result1_run2 = analyzer1.run()
+    print(json.dumps(result1_run2, indent=2))
+    assert result1_run1 == result1_run2 # Results should be identical if from cache or re-computed
+
+    sample_paper_2_data = {
+        "id": "pubmed:sample002_v2",
         "title": "The Effect of Drug X on Protein Y",
         "abstract": ("We investigated the effect of Drug X on Protein Y in vitro. Our study reveals that Drug X inhibits Protein Y activity. "
                      "Experiments demonstrate a dose-dependent response. This is a key finding for cancer research. "
                      "However, the study was limited to cell cultures. Further research is needed in vivo. "
                      "The data was analyzed using statistical analysis and regression models. "
                      "This work validates the potential of Drug X."),
+        "keywords": [], "categories": [],
         "mesh_terms": ["Drug X", "Protein Y", "Neoplasms", "Cell Line"]
     }
-    analyzer2 = DeepAnalyzer(paper_data=sample_paper_2)
-    result2 = analyzer2.run()
-
+    analyzer2 = DeepAnalyzer(paper_data=sample_paper_2_data)
     print("\n--- Deep Analysis Result 2 ---")
+    result2 = analyzer2.run()
     print(json.dumps(result2, indent=2))
 
-    sample_paper_no_abstract = {
-        "id": "special:noabs003",
+    sample_paper_no_abstract_data = {
+        "id": "special:noabs003_v2",
         "title": "A Paper With No Abstract",
-        "abstract": "" # Empty abstract
+        "abstract": "",
+        "keywords": [], "categories": [], "mesh_terms": []
     }
-    analyzer3 = DeepAnalyzer(paper_data=sample_paper_no_abstract)
-    result3 = analyzer3.run()
+    analyzer3 = DeepAnalyzer(paper_data=sample_paper_no_abstract_data)
     print("\n--- Deep Analysis Result 3 (No Abstract) ---")
+    result3 = analyzer3.run()
     print(json.dumps(result3, indent=2))
+
+    logger.info("DeepAnalyzer tests finished. Check logs for 'Cache Miss' messages to verify caching behavior.")
